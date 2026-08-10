@@ -21,7 +21,13 @@
     id: SceneId;
     name: string;
     description: string;
+    icon: string;
     items: LayoutItem[];
+  }
+
+  interface SceneMetric {
+    label: string;
+    value: number;
   }
 
   interface EntityDraft {
@@ -37,35 +43,38 @@
       id: "today",
       name: "今日执行",
       description: "集中处理任务、日程与近期项目",
+      icon: "✓",
       items: [
-        { widgetId: "core.quick-create", x: 0, y: 0, width: 4, height: 2 },
-        { widgetId: "tasks.today", x: 4, y: 0, width: 8, height: 5 },
-        { widgetId: "core.calendar", x: 0, y: 2, width: 4, height: 3 },
-        { widgetId: "projects.recent", x: 0, y: 5, width: 7, height: 4 },
-        { widgetId: "meetings.actions", x: 7, y: 5, width: 5, height: 4 }
+        { widgetId: "tasks.today", x: 0, y: 0, width: 6, height: 5 },
+        { widgetId: "core.calendar", x: 6, y: 0, width: 3, height: 5 },
+        { widgetId: "core.quick-create", x: 9, y: 0, width: 3, height: 2 },
+        { widgetId: "projects.recent", x: 9, y: 2, width: 3, height: 3 }
       ]
     },
     {
       id: "projects",
       name: "项目管理",
       description: "查看项目、客户、任务与会议行动项",
+      icon: "◆",
       items: [
-        { widgetId: "projects.status", x: 0, y: 0, width: 7, height: 5 },
-        { widgetId: "tasks.project", x: 7, y: 0, width: 5, height: 5 },
-        { widgetId: "meetings.actions", x: 0, y: 5, width: 4, height: 4 },
-        { widgetId: "clients.list", x: 4, y: 5, width: 4, height: 4 },
-        { widgetId: "suppliers.list", x: 8, y: 5, width: 4, height: 4 }
+        { widgetId: "projects.status", x: 0, y: 0, width: 4, height: 4 },
+        { widgetId: "projects.milestones", x: 4, y: 0, width: 4, height: 4 },
+        { widgetId: "tasks.project", x: 8, y: 0, width: 4, height: 4 },
+        { widgetId: "clients.list", x: 0, y: 4, width: 6, height: 4 },
+        { widgetId: "suppliers.list", x: 6, y: 4, width: 6, height: 4 },
+        { widgetId: "meetings.actions", x: 0, y: 8, width: 12, height: 4 }
       ]
     },
     {
       id: "knowledge",
       name: "知识整理",
       description: "处理知识收件箱并建立项目关联",
+      icon: "◇",
       items: [
-        { widgetId: "knowledge.inbox", x: 0, y: 0, width: 8, height: 6 },
-        { widgetId: "projects.recent", x: 8, y: 0, width: 4, height: 3 },
-        { widgetId: "tasks.today", x: 8, y: 3, width: 4, height: 3 },
-        { widgetId: "core.diagnostics", x: 0, y: 6, width: 12, height: 2, collapsed: true }
+        { widgetId: "knowledge.inbox", x: 0, y: 0, width: 4, height: 4 },
+        { widgetId: "knowledge.triage", x: 4, y: 0, width: 4, height: 4 },
+        { widgetId: "knowledge.project-links", x: 8, y: 0, width: 4, height: 4 },
+        { widgetId: "knowledge.recent", x: 0, y: 4, width: 12, height: 4 }
       ]
     }
   ];
@@ -115,10 +124,14 @@
     "core.calendar": "日程",
     "projects.recent": "开放项目",
     "projects.status": "项目状态",
+    "projects.milestones": "项目里程碑",
     "meetings.actions": "会议与行动项",
     "clients.list": "客户",
     "suppliers.list": "供应商",
     "knowledge.inbox": "知识收件箱",
+    "knowledge.triage": "待沉淀与待读",
+    "knowledge.project-links": "已关联项目",
+    "knowledge.recent": "最近知识笔记",
     "core.diagnostics": "诊断"
   };
 
@@ -142,6 +155,42 @@
 
   function sceneDescription(sceneId: string): string {
     return sceneDefinitions.find((scene) => scene.id === sceneId)?.description ?? "自定义工作台布局";
+  }
+
+  function sceneIcon(sceneId: string): string {
+    return sceneDefinitions.find((scene) => scene.id === sceneId)?.icon ?? "▦";
+  }
+
+  function sceneMetrics(sceneId: string): SceneMetric[] {
+    const today = formatDate(new Date(), "YYYY-MM-DD");
+    if (sceneId === "projects") {
+      return [
+        { label: "开放项目", value: snapshot.projects.length },
+        { label: "有截止日期", value: snapshot.projects.filter((project) => project.due).length },
+        { label: "会议草稿", value: snapshot.tasks.filter((task) => task.scope === "meeting-draft" && !task.completed).length }
+      ];
+    }
+    if (sceneId === "knowledge") {
+      return [
+        { label: "待处理", value: snapshot.knowledge.filter((entry) => !entry.status || entry.status === "待处理").length },
+        { label: "待沉淀/待读", value: snapshot.knowledge.filter((entry) => entry.status === "待沉淀" || entry.status === "待读").length },
+        { label: "已关联项目", value: snapshot.knowledge.filter((entry) => entry.related).length }
+      ];
+    }
+    return [
+      { label: "逾期", value: snapshot.tasks.filter((task) => !task.completed && task.due && task.due < today).length },
+      { label: "今天到期", value: snapshot.tasks.filter((task) => !task.completed && task.due === today).length },
+      { label: "未来 7 天", value: calendarTasks().length }
+    ];
+  }
+
+  function knowledgeHint(widgetId: string): string {
+    return {
+      "knowledge.inbox": "尚未分流的收件箱内容",
+      "knowledge.triage": "需要沉淀为长期知识或安排阅读",
+      "knowledge.project-links": "已经连接到具体项目的知识",
+      "knowledge.recent": "按最近更新时间查看全部知识"
+    }[widgetId] ?? "知识处理队列";
   }
 
   function dialogTitle(kind: DialogKind): string {
@@ -495,7 +544,7 @@
   onDestroy(() => unsubscribe());
 </script>
 
-<div class="qwb-shell">
+<div class="qwb-shell" data-scene={activeScene}>
   <header class="qwb-header">
     <div>
       <div class="qwb-eyebrow">QUIET WORKBENCH</div>
@@ -514,9 +563,16 @@
 
   <nav class="qwb-scenes" aria-label="工作台场景">
     {#each workbenchLayouts() as scene}
-      <button class:active={activeScene === scene.id} on:click={() => selectScene(scene.id)}>{scene.name}</button>
+      <button class:active={activeScene === scene.id} on:click={() => selectScene(scene.id)}><i>{sceneIcon(scene.id)}</i><span>{scene.name}</span></button>
     {/each}
   </nav>
+
+  <section class="qwb-scene-summary" aria-label={`${sceneTitle(activeScene)}概览`}>
+    <div class="qwb-scene-mark" aria-hidden="true">{sceneIcon(activeScene)}</div>
+    {#each sceneMetrics(activeScene) as metric}
+      <div class="qwb-scene-metric"><strong>{metric.value}</strong><span>{metric.label}</span></div>
+    {/each}
+  </section>
 
   <div class="qwb-layout-actions" aria-label="布局操作">
     <button disabled={!layoutUndo.length || busy} on:click={() => run(undoLayout, "已撤销布局调整")}>撤销布局</button>
@@ -578,19 +634,21 @@
                   </div>
                 {/each}
               </div>
-              <div class="qwb-scope-section">
-                <div class="qwb-section-title"><span class="qwb-scope client">客户行动</span><strong>{tasksForWidget(item.widgetId, "client").length}</strong></div>
-                {#each tasksForWidget(item.widgetId, "client").slice(0, 4) as task (task.id)}
-                  <div class="qwb-task-row"><input type="checkbox" disabled={!controller.settings.writesEnabled || busy} on:change={(event) => run(() => controller.updateTask(task, { completed: (event.currentTarget as HTMLInputElement).checked }), "客户行动已更新")} /><button class="qwb-link" on:click={() => controller.openPath(task.path)}>{task.text}</button>{#if task.due}<time>{task.due}</time>{/if}<button class="qwb-row-action" on:click={() => openTaskEdit(task)}>编辑</button></div>
-                {/each}
-              </div>
-              <div class="qwb-scope-section">
-                <div class="qwb-section-title"><span class="qwb-scope meeting">会议草稿</span><strong>{tasksForWidget(item.widgetId, "meeting-draft").length}</strong></div>
-                {#each tasksForWidget(item.widgetId, "meeting-draft").slice(0, 4) as task (task.id)}
-                  <div class="qwb-task-row"><button class="qwb-link" on:click={() => controller.openPath(task.path)}>{task.text}</button>{#if task.due}<time>{task.due}</time>{/if}<button class="qwb-row-action" disabled={!controller.settings.writesEnabled} on:click={() => openMigration(task)}>迁移</button></div>
-                {/each}
-                {#if tasksByScope("meeting-draft").length > 1}<button class="qwb-text-action" disabled={!controller.settings.writesEnabled} on:click={() => openMigration()}>批量迁移全部会议草稿</button>{/if}
-              </div>
+              {#if item.widgetId === "tasks.today"}
+                <div class="qwb-scope-section">
+                  <div class="qwb-section-title"><span class="qwb-scope client">客户行动</span><strong>{tasksForWidget(item.widgetId, "client").length}</strong></div>
+                  {#each tasksForWidget(item.widgetId, "client").slice(0, 4) as task (task.id)}
+                    <div class="qwb-task-row"><input type="checkbox" disabled={!controller.settings.writesEnabled || busy} on:change={(event) => run(() => controller.updateTask(task, { completed: (event.currentTarget as HTMLInputElement).checked }), "客户行动已更新")} /><button class="qwb-link" on:click={() => controller.openPath(task.path)}>{task.text}</button>{#if task.due}<time>{task.due}</time>{/if}<button class="qwb-row-action" on:click={() => openTaskEdit(task)}>编辑</button></div>
+                  {/each}
+                </div>
+                <div class="qwb-scope-section">
+                  <div class="qwb-section-title"><span class="qwb-scope meeting">会议草稿</span><strong>{tasksForWidget(item.widgetId, "meeting-draft").length}</strong></div>
+                  {#each tasksForWidget(item.widgetId, "meeting-draft").slice(0, 4) as task (task.id)}
+                    <div class="qwb-task-row"><button class="qwb-link" on:click={() => controller.openPath(task.path)}>{task.text}</button>{#if task.due}<time>{task.due}</time>{/if}<button class="qwb-row-action" disabled={!controller.settings.writesEnabled} on:click={() => openMigration(task)}>迁移</button></div>
+                  {/each}
+                  {#if tasksByScope("meeting-draft").length > 1}<button class="qwb-text-action" disabled={!controller.settings.writesEnabled} on:click={() => openMigration()}>批量迁移全部会议草稿</button>{/if}
+                </div>
+              {/if}
               <button class="qwb-text-action" on:click={() => openTask()}>＋ 添加项目任务</button>
             {:else if item.widgetId === "core.calendar"}
               <div class="qwb-calendar-date"><strong>{new Date().getDate()}</strong><span>{new Intl.DateTimeFormat("zh-CN", { month: "long", weekday: "long" }).format(new Date())}</span></div>
@@ -645,11 +703,14 @@
               </div>
               <button class="qwb-text-action" on:click={() => openCreate("supplier")}>＋ 新建供应商</button>
             {:else if item.widgetId.startsWith("knowledge.")}
-              <div class="qwb-knowledge-summary">
-                {#each ["待处理", "待沉淀", "待读", "已归档", "重复"] as status}
-                  <div><strong>{snapshot.knowledge.filter((entry) => entry.status === status).length}</strong><span>{status}</span></div>
-                {/each}
-              </div>
+              <p class="qwb-widget-hint">{knowledgeHint(item.widgetId)}</p>
+              {#if item.widgetId === "knowledge.inbox"}
+                <div class="qwb-knowledge-summary">
+                  {#each ["待处理", "待沉淀", "待读", "已归档", "重复"] as status}
+                    <div><strong>{snapshot.knowledge.filter((entry) => entry.status === status).length}</strong><span>{status}</span></div>
+                  {/each}
+                </div>
+              {/if}
               <div class="qwb-entity-list">
                 {#each knowledgeForWidget(item.widgetId).filter((entry) => item.widgetId === "knowledge.recent" || entry.status !== "已归档").slice(0, 10) as entry}
                   <div class="qwb-knowledge-row"><button on:click={() => controller.openPath(entry.path)}><span class="qwb-entity-icon knowledge">K</span><span><strong>{entry.name}</strong><small>{entry.status || "待处理"}{entry.related ? ` · ${entry.related}` : ""}</small></span><i>›</i></button><button class="qwb-row-action" disabled={!controller.settings.writesEnabled} on:click={() => openKnowledge(entry.path, entry.status)}>处理</button></div>
