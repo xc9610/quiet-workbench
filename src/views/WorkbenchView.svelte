@@ -16,6 +16,7 @@
   type SceneId = string;
   type DialogKind = "entity" | "task" | "task-edit" | "migrate" | "knowledge" | null;
   type MoveMode = "move" | "resize";
+  const UI_VERSION = "0.1.1";
 
   interface SceneDefinition {
     id: SceneId;
@@ -226,14 +227,6 @@
     };
     const pack = packByPrefix[prefix];
     return !pack || controller.settings.enabledPacks[pack] !== false;
-  }
-
-  function visibleItems(): LayoutItem[] {
-    return items.filter((item) => !item.hidden && enabled(item.widgetId));
-  }
-
-  function hiddenItems(): LayoutItem[] {
-    return items.filter((item) => item.hidden);
   }
 
   function itemStyle(item: LayoutItem): string {
@@ -547,7 +540,7 @@
 <div class="qwb-shell" data-scene={activeScene}>
   <header class="qwb-header">
     <div>
-      <div class="qwb-eyebrow">QUIET WORKBENCH</div>
+      <div class="qwb-eyebrow">QUIET WORKBENCH · {UI_VERSION} · {activeScene.toUpperCase()}</div>
       <h1>{sceneTitle(activeScene)}</h1>
       <p>{sceneDescription(activeScene)}</p>
     </div>
@@ -594,8 +587,9 @@
     <div class="qwb-toast" role="status">{message}</div>
   {/if}
 
-  <div class="qwb-grid" bind:this={gridEl}>
-    {#each visibleItems() as item (item.widgetId)}
+  {#key activeScene}
+    <div class="qwb-grid" bind:this={gridEl}>
+    {#each items.filter((item) => !item.hidden && enabled(item.widgetId)) as item (item.widgetId)}
       <section class:collapsed={item.collapsed} class="qwb-widget" style={itemStyle(item)}>
         <header class="qwb-widget-header">
           <button class="qwb-drag-handle" aria-label={`移动${widgetTitles[item.widgetId]}`} on:pointerdown={(event) => beginPointer(event, item, "move")}>
@@ -742,16 +736,17 @@
         {/if}
       </section>
     {/each}
-  </div>
+    </div>
 
-  {#if hiddenItems().length}
-    <footer class="qwb-hidden-widgets">
-      <span>已隐藏</span>
-      {#each hiddenItems() as item}
-        <button on:click={() => setItemState(item.widgetId, { hidden: false })}>＋ {widgetTitles[item.widgetId]}</button>
-      {/each}
-    </footer>
-  {/if}
+    {#if items.some((item) => item.hidden)}
+      <footer class="qwb-hidden-widgets">
+        <span>已隐藏</span>
+        {#each items.filter((item) => item.hidden) as item}
+          <button on:click={() => setItemState(item.widgetId, { hidden: false })}>＋ {widgetTitles[item.widgetId]}</button>
+        {/each}
+      </footer>
+    {/if}
+  {/key}
 </div>
 
 {#if dialog}
