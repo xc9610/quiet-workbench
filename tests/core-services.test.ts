@@ -3,7 +3,7 @@ import type { TaskRecord } from "../src/core/types";
 import { EntityIndex } from "../src/services/entity-index";
 import { MeetingMigrationService } from "../src/services/meeting-migration-service";
 import { ProjectTaskService } from "../src/services/task-service";
-import { TemplateService, UnsupportedTemplateExpressionError } from "../src/services/template-service";
+import { formatDate, TemplateService, UnsupportedTemplateExpressionError } from "../src/services/template-service";
 import { TransactionJournal, WriteTransactionExecutor } from "../src/services/transaction-service";
 import type { VaultFileInfo, VaultPort } from "../src/services/vault-port";
 import { canonicalizeFields, type EntityIndexConfig } from "../src/domain/entities";
@@ -106,6 +106,12 @@ describe("Markdown domain", () => {
 });
 
 describe("TemplateService", () => {
+  it("formats calendar dates from local time at midnight instead of UTC", () => {
+    const localAfterMidnight = new Date(2026, 7, 11, 0, 23, 0);
+
+    expect(formatDate(localAfterMidnight, "YYYY-MM-DD")).toBe("2026-08-11");
+  });
+
   it("renders only title and deterministic date expressions", () => {
     const service = new TemplateService();
     const result = service.render(

@@ -9,6 +9,7 @@
     WorkbenchSnapshot
   } from "../ui/controller";
   import { EMPTY_SNAPSHOT } from "../ui/controller";
+  import { formatDate } from "../services/template-service";
 
   export let controller: WorkbenchController;
 
@@ -79,7 +80,7 @@
   let entityName = "";
   let relatedClient = "";
   let relatedProject = "";
-  let entityDate = new Date().toISOString().slice(0, 10);
+  let entityDate = formatDate(new Date(), "YYYY-MM-DD");
   let entityTemplatePreview = "";
   let projectPath = "";
   let taskText = "";
@@ -458,7 +459,7 @@
   function tasksForWidget(widgetId: string, scope: TaskRecord["scope"]): TaskRecord[] {
     const rows = snapshot.tasks.filter((task) => task.scope === scope && !task.completed);
     if (widgetId === "tasks.today") {
-      const today = new Date().toISOString().slice(0, 10);
+      const today = formatDate(new Date(), "YYYY-MM-DD");
       return rows.filter((task) => task.due && task.due <= today).slice(0, 8);
     }
     return rows.slice(0, 8);
@@ -466,10 +467,10 @@
 
   function calendarTasks(): TaskRecord[] {
     const today = new Date();
-    const from = today.toISOString().slice(0, 10);
+    const from = formatDate(today, "YYYY-MM-DD");
     const untilDate = new Date(today);
     untilDate.setDate(today.getDate() + 7);
-    const until = untilDate.toISOString().slice(0, 10);
+    const until = formatDate(untilDate, "YYYY-MM-DD");
     return snapshot.tasks.filter((task) => !task.completed && task.due && task.due >= from && task.due <= until).slice(0, 8);
   }
 
