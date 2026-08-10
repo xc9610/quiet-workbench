@@ -193,6 +193,19 @@
   overflow-wrap: anywhere;
 }
 
+.qwb-template-preview {
+  max-height: 240px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-primary-alt);
+  color: var(--text-muted);
+  padding: 10px;
+  font-size: var(--font-ui-smaller);
+}
+
 .qwb-scenes button {
   border: 0;
   background: transparent;

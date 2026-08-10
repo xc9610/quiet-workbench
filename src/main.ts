@@ -167,6 +167,17 @@ class PluginWorkbenchController implements WorkbenchController {
 
   async createEntity(input: CreateEntityInput): Promise<TransactionReceipt> {
     this.requireWrites();
+    const { path, content } = await this.previewEntity(input);
+    const receipt = await this.transactions.execute({
+      label: `Create ${input.kind}: ${sanitizeTitle(input.name)}`,
+      operations: [{ kind: "create", path, content }]
+    });
+    await this.afterReceipt(receipt, path);
+    if (receipt.status === "committed" && input.openAfterCreate !== false) await this.openPath(path);
+    return receipt;
+  }
+
+  async previewEntity(input: CreateEntityInput): Promise<{ path: string; content: string }> {
     const name = sanitizeTitle(input.name);
     const folder = this.folderForKind(input.kind);
     const templatePath = this.plugin.settings.templates[input.kind];
@@ -177,13 +188,7 @@ class PluginWorkbenchController implements WorkbenchController {
     let content = this.templates.render(template, { title: stem, now: parseDate(input.date) });
     content = applyEntityContext(content, input);
     const path = normalizeVaultPath(`${folder}/${stem}.md`);
-    const receipt = await this.transactions.execute({
-      label: `Create ${input.kind}: ${name}`,
-      operations: [{ kind: "create", path, content }]
-    });
-    await this.afterReceipt(receipt, path);
-    if (receipt.status === "committed" && input.openAfterCreate !== false) await this.openPath(path);
-    return receipt;
+    return { path, content };
   }
 
   async addProjectTask(input: AddProjectTaskInput): Promise<TransactionReceipt> {
@@ -556,6 +561,9 @@ function entitySummary(entity: EntityRecord): EntitySummary {
       ? fieldString(entity.fields, ["triage_status", "status"])
       : fieldString(entity.fields, ["status", "project_status", "relationship_status"]),
     related: fieldString(entity.fields, ["project", "projects", "client", "customer", "organization"]),
+    detail: fieldString(entity.fields, ["next_action", "main_requirement", "topic", "profile_summary"]),
+    due: fieldString(entity.fields, ["due", "target_date", "followup_date", "meeting_date"]),
+    phase: fieldString(entity.fields, ["phase", "project_phase"]),
     updatedAt: entity.mtime
   };
 }

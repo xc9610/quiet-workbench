@@ -19,6 +19,9 @@ export interface EntitySummary {
   path: string;
   status?: string;
   related?: string;
+  detail?: string;
+  due?: string;
+  phase?: string;
   updatedAt?: number;
 }
 
@@ -70,6 +73,7 @@ export interface WorkbenchController {
   setActivePath(path?: string): Promise<void>;
   openPath(path: string): Promise<void>;
   createEntity(input: CreateEntityInput): Promise<TransactionReceipt>;
+  previewEntity(input: CreateEntityInput): Promise<{ path: string; content: string }>;
   addProjectTask(input: AddProjectTaskInput): Promise<TransactionReceipt>;
   updateTask(task: TaskRecord, patch: { completed?: boolean; due?: string | null; priority?: TaskRecord["priority"] }): Promise<TransactionReceipt>;
   migrateMeetingTask(task: TaskRecord, targetPath: string): Promise<TransactionReceipt | undefined>;

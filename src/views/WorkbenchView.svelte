@@ -80,6 +80,7 @@
   let relatedClient = "";
   let relatedProject = "";
   let entityDate = new Date().toISOString().slice(0, 10);
+  let entityTemplatePreview = "";
   let projectPath = "";
   let taskText = "";
   let taskDue = "";
@@ -276,6 +277,7 @@
     entityName = "";
     relatedClient = "";
     relatedProject = "";
+    entityTemplatePreview = "";
     entityStack = [];
     dialog = "entity";
   }
@@ -292,6 +294,20 @@
     entityName = "";
     relatedClient = "";
     relatedProject = "";
+    entityTemplatePreview = "";
+  }
+
+  async function previewEntityTemplate(): Promise<void> {
+    if (!entityName.trim()) return;
+    const result = await controller.previewEntity({
+      kind: entityKind,
+      name: entityName.trim(),
+      relatedClient: relatedClient || undefined,
+      relatedProject: relatedProject || undefined,
+      date: entityDate || undefined,
+      openAfterCreate: false
+    });
+    entityTemplatePreview = `${result.path}\n\n${result.content}`;
   }
 
   function openTask(path?: string): void {
@@ -391,6 +407,7 @@
       relatedClient = childKind === "client" ? createdPath : parent.relatedClient;
       relatedProject = childKind === "project" ? createdPath : parent.relatedProject;
       entityDate = parent.date;
+      entityTemplatePreview = "";
       message = `${childKind === "client" ? "客户" : "项目"}已创建，已返回原表单`;
     } catch (error) {
       message = error instanceof Error ? error.message : String(error);
@@ -436,6 +453,32 @@
 
   function tasksByScope(scope: TaskRecord["scope"]): TaskRecord[] {
     return snapshot.tasks.filter((task) => task.scope === scope && !task.completed).slice(0, 8);
+  }
+
+  function tasksForWidget(widgetId: string, scope: TaskRecord["scope"]): TaskRecord[] {
+    const rows = snapshot.tasks.filter((task) => task.scope === scope && !task.completed);
+    if (widgetId === "tasks.today") {
+      const today = new Date().toISOString().slice(0, 10);
+      return rows.filter((task) => task.due && task.due <= today).slice(0, 8);
+    }
+    return rows.slice(0, 8);
+  }
+
+  function calendarTasks(): TaskRecord[] {
+    const today = new Date();
+    const from = today.toISOString().slice(0, 10);
+    const untilDate = new Date(today);
+    untilDate.setDate(today.getDate() + 7);
+    const until = untilDate.toISOString().slice(0, 10);
+    return snapshot.tasks.filter((task) => !task.completed && task.due && task.due >= from && task.due <= until).slice(0, 8);
+  }
+
+  function knowledgeForWidget(widgetId: string) {
+    const rows = [...snapshot.knowledge].sort((left, right) => (right.updatedAt ?? 0) - (left.updatedAt ?? 0));
+    if (widgetId === "knowledge.inbox") return rows.filter((entry) => !entry.status || entry.status === "待处理");
+    if (widgetId === "knowledge.triage") return rows.filter((entry) => entry.status === "待沉淀" || entry.status === "待读");
+    if (widgetId === "knowledge.project-links") return rows.filter((entry) => entry.related);
+    return rows;
   }
 
   onMount(() => {
@@ -524,8 +567,8 @@
               <button class="qwb-button qwb-button-primary qwb-full" on:click={() => openTask()}>添加项目任务</button>
             {:else if item.widgetId.startsWith("tasks.")}
               <div class="qwb-scope-section">
-                <div class="qwb-section-title"><span class="qwb-scope project">项目</span><strong>{tasksByScope("project").length}</strong></div>
-                {#each tasksByScope("project") as task (task.id)}
+                <div class="qwb-section-title"><span class="qwb-scope project">{item.widgetId === "tasks.today" ? "逾期与今天" : "项目"}</span><strong>{tasksForWidget(item.widgetId, "project").length}</strong></div>
+                {#each tasksForWidget(item.widgetId, "project") as task (task.id)}
                   <div class="qwb-task-row">
                     <input type="checkbox" checked={task.completed} disabled={!controller.settings.writesEnabled || busy} on:change={(event) => run(() => controller.updateTask(task, { completed: (event.currentTarget as HTMLInputElement).checked }), "任务状态已更新")} />
                     <button class="qwb-link" on:click={() => controller.openPath(task.path)}>{task.text}</button>
@@ -535,14 +578,14 @@
                 {/each}
               </div>
               <div class="qwb-scope-section">
-                <div class="qwb-section-title"><span class="qwb-scope client">客户行动</span><strong>{tasksByScope("client").length}</strong></div>
-                {#each tasksByScope("client").slice(0, 4) as task (task.id)}
+                <div class="qwb-section-title"><span class="qwb-scope client">客户行动</span><strong>{tasksForWidget(item.widgetId, "client").length}</strong></div>
+                {#each tasksForWidget(item.widgetId, "client").slice(0, 4) as task (task.id)}
                   <div class="qwb-task-row"><input type="checkbox" disabled={!controller.settings.writesEnabled || busy} on:change={(event) => run(() => controller.updateTask(task, { completed: (event.currentTarget as HTMLInputElement).checked }), "客户行动已更新")} /><button class="qwb-link" on:click={() => controller.openPath(task.path)}>{task.text}</button>{#if task.due}<time>{task.due}</time>{/if}<button class="qwb-row-action" on:click={() => openTaskEdit(task)}>编辑</button></div>
                 {/each}
               </div>
               <div class="qwb-scope-section">
-                <div class="qwb-section-title"><span class="qwb-scope meeting">会议草稿</span><strong>{tasksByScope("meeting-draft").length}</strong></div>
-                {#each tasksByScope("meeting-draft").slice(0, 4) as task (task.id)}
+                <div class="qwb-section-title"><span class="qwb-scope meeting">会议草稿</span><strong>{tasksForWidget(item.widgetId, "meeting-draft").length}</strong></div>
+                {#each tasksForWidget(item.widgetId, "meeting-draft").slice(0, 4) as task (task.id)}
                   <div class="qwb-task-row"><button class="qwb-link" on:click={() => controller.openPath(task.path)}>{task.text}</button>{#if task.due}<time>{task.due}</time>{/if}<button class="qwb-row-action" disabled={!controller.settings.writesEnabled} on:click={() => openMigration(task)}>迁移</button></div>
                 {/each}
                 {#if tasksByScope("meeting-draft").length > 1}<button class="qwb-text-action" disabled={!controller.settings.writesEnabled} on:click={() => openMigration()}>批量迁移全部会议草稿</button>{/if}
@@ -551,17 +594,23 @@
             {:else if item.widgetId === "core.calendar"}
               <div class="qwb-calendar-date"><strong>{new Date().getDate()}</strong><span>{new Intl.DateTimeFormat("zh-CN", { month: "long", weekday: "long" }).format(new Date())}</span></div>
               <div class="qwb-calendar-lines">
-                {#each snapshot.tasks.filter((task) => task.due).slice(0, 4) as task}
+                {#each calendarTasks() as task}
                   <button on:click={() => controller.openPath(task.path)}><time>{task.due}</time><span>{task.text}</span></button>
                 {:else}
                   <p class="qwb-empty">今天没有已标记日期的任务。</p>
                 {/each}
               </div>
+            {:else if item.widgetId === "projects.milestones"}
+              <div class="qwb-entity-list compact">
+                {#each snapshot.projects.filter((project) => project.due).sort((left, right) => (left.due ?? "").localeCompare(right.due ?? "")).slice(0, 10) as project}
+                  <button on:click={() => controller.openPath(project.path)}><span class="qwb-entity-icon project">◆</span><span><strong>{project.name}</strong><small>{project.phase || "当前阶段"} · {project.due}</small></span><i>›</i></button>
+                {:else}<p class="qwb-empty">开放项目尚未设置里程碑或截止日期。</p>{/each}
+              </div>
             {:else if item.widgetId.startsWith("projects.")}
               <div class="qwb-entity-list">
                 {#each snapshot.projects.slice(0, 12) as project}
                   <button on:click={() => controller.openPath(project.path)}>
-                    <span class="qwb-entity-icon project">P</span><span><strong>{project.name}</strong><small>{project.status || "开放项目"}</small></span>
+                    <span class="qwb-entity-icon project">P</span><span><strong>{project.name}</strong><small>{project.phase || project.status || "开放项目"}{project.detail ? ` · ${project.detail}` : ""}</small></span>
                     <i>›</i>
                   </button>
                 {:else}
@@ -570,6 +619,10 @@
               </div>
               <button class="qwb-text-action" on:click={() => openCreate("project")}>＋ 新建项目</button>
             {:else if item.widgetId.startsWith("meetings.")}
+              <div class="qwb-scope-section">
+                <div class="qwb-section-title"><span class="qwb-scope meeting">待迁移行动项</span><strong>{tasksByScope("meeting-draft").length}</strong></div>
+                {#each tasksByScope("meeting-draft").slice(0, 6) as task}<div class="qwb-task-row"><button class="qwb-link" on:click={() => controller.openPath(task.path)}>{task.text}</button>{#if task.due}<time>{task.due}</time>{/if}<button class="qwb-row-action" disabled={!controller.settings.writesEnabled} on:click={() => openMigration(task)}>迁移</button></div>{/each}
+              </div>
               <div class="qwb-entity-list compact">
                 {#each snapshot.meetings.slice(0, 8) as meeting}
                   <button on:click={() => controller.openPath(meeting.path)}><span class="qwb-entity-icon meeting">M</span><span><strong>{meeting.name}</strong><small>{meeting.related || "会议记录"}</small></span><i>›</i></button>
@@ -597,7 +650,7 @@
                 {/each}
               </div>
               <div class="qwb-entity-list">
-                {#each snapshot.knowledge.filter((entry) => entry.status !== "已归档").slice(0, 10) as entry}
+                {#each knowledgeForWidget(item.widgetId).filter((entry) => item.widgetId === "knowledge.recent" || entry.status !== "已归档").slice(0, 10) as entry}
                   <div class="qwb-knowledge-row"><button on:click={() => controller.openPath(entry.path)}><span class="qwb-entity-icon knowledge">K</span><span><strong>{entry.name}</strong><small>{entry.status || "待处理"}{entry.related ? ` · ${entry.related}` : ""}</small></span><i>›</i></button><button class="qwb-row-action" disabled={!controller.settings.writesEnabled} on:click={() => openKnowledge(entry.path, entry.status)}>处理</button></div>
                 {:else}<p class="qwb-empty">知识收件箱已清空。</p>{/each}
               </div>
@@ -652,6 +705,8 @@
         {#if entityKind === "project"}<label>关联客户<select bind:value={relatedClient}><option value="">暂不关联</option>{#each snapshot.clients as client}<option value={client.path}>{client.name}</option>{/each}</select></label><button class="qwb-text-action" type="button" on:click={() => beginNestedEntity("client")}>＋ 没有客户？先创建客户</button>{/if}
         {#if entityKind === "meeting"}<label>关联项目<select bind:value={relatedProject}><option value="">暂不关联</option>{#each snapshot.projects as project}<option value={project.path}>{project.name}</option>{/each}</select></label><button class="qwb-text-action" type="button" on:click={() => beginNestedEntity("project")}>＋ 没有项目？先创建项目</button><label>日期<input type="date" bind:value={entityDate} /></label>{/if}
         <div class="qwb-inline-preview"><strong>写入预览</strong><div>{entityTargetFolder()}/{entityKind === "meeting" && entityDate ? `${entityDate} ` : ""}{entityName || "未命名"}.md</div><small>确认后仍会执行模板、重名与路径预检。</small></div>
+        <button class="qwb-text-action" type="button" disabled={!entityName.trim() || busy} on:click={() => run(previewEntityTemplate, "模板预览已生成")}>生成完整模板预览</button>
+        {#if entityTemplatePreview}<pre class="qwb-template-preview">{entityTemplatePreview}</pre>{/if}
         <div class="qwb-modal-actions"><button class="qwb-button qwb-button-subtle" on:click={() => (dialog = null)}>取消</button><button class="qwb-button qwb-button-primary" disabled={!controller.settings.writesEnabled || !entityName.trim() || busy} on:click={submitEntity}>确认创建</button></div>
       {:else if dialog === "task"}
         <label>项目<select bind:value={projectPath}><option value="">选择项目</option>{#each snapshot.projects as project}<option value={project.path}>{project.name}</option>{/each}</select></label>

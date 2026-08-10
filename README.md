@@ -16,6 +16,39 @@ Markdown files.
 Run `pnpm install && pnpm verify`, then copy `main.js`, `manifest.json`, and
 `styles.css` into `<vault>/.obsidian/plugins/quiet-workbench/`.
 
+## 使用流程
+
+1. 在 Obsidian 的「第三方插件」中启用 Quiet Workbench。
+2. 先运行命令「刷新索引并运行诊断」；初始状态不会写入业务笔记。
+3. 用 Ribbon 图标打开完整工作台，用命令「打开上下文侧栏」打开右侧面板。
+4. 核对目录、模板和字段别名后，在插件设置中二次确认启用写入。
+5. 原 `Workbench.md`、`Workbench Panel.md` 和 Homepage 配置不会自动删除或替换。
+
+工作台包含今日执行、项目管理、知识整理三套默认布局。桌面端可拖动和缩放，
+移动端使用排序、折叠和隐藏。布局撤销与业务事务撤销相互独立。
+
+## Data compatibility
+
+- Task scopes: `project`, `client`, and `meeting-draft`.
+- Canonical client fields: `organization_type`, `business_domains`,
+  `relationship_status`, and `followup_date`.
+- Knowledge states: 待处理、待沉淀、待读、已归档、重复.
+- Templater compatibility is deliberately limited to `tp.file.title` and
+  `tp.date.now(...)`; arbitrary template JavaScript is never executed.
+
+## GitHub and approval
+
+GitHub is not required for local installation and local use does not need
+Obsidian approval. A local Git repository is sufficient for private versioning.
+
+For beta distribution, publish versioned GitHub Releases and optionally use
+BRAT. For the official Community directory, the source must be reviewable on
+GitHub and the repository root must contain `README.md`, `LICENSE`, and
+`manifest.json`. The release tag must exactly match `manifest.version` (for
+example `0.1.0`, not `v0.1.0`) and attach `main.js`, `manifest.json`, and
+`styles.css`. Initial listing requires Obsidian's automated review. Later
+versions use matching GitHub Releases and continue to receive security scans.
+
 ## Development
 
 Use a separate test vault containing only fictitious data. Node.js 22 LTS and
