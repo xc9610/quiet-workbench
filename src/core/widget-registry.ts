@@ -95,6 +95,7 @@ const both: WorkbenchSurface[] = ["workbench", "sidebar"];
 
 export const BUILTIN_WIDGETS: RegisteredWidgetDefinition[] = [
   { id: "tasks.today", title: "今日任务", surfaces: both, pack: "tasks", refresh: "live", defaultSize: { width: 6, height: 5 } },
+  { id: "tasks.upcoming", title: "近期待办", surfaces: ["sidebar"], pack: "tasks", refresh: "live", defaultSize: { width: 1, height: 4 } },
   { id: "core.calendar", title: "日历", surfaces: ["workbench"], pack: "core", refresh: "live", defaultSize: { width: 3, height: 5 } },
   { id: "core.quick-create", title: "快捷创建", surfaces: both, pack: "core", refresh: "manual", defaultSize: { width: 3, height: 2 } },
   { id: "core.diagnostics", title: "诊断", surfaces: both, pack: "core", refresh: "manual", defaultSize: { width: 3, height: 3 } },

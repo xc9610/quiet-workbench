@@ -1,7 +1,7 @@
 {
   "id": "quiet-workbench",
   "name": "Quiet Workbench",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "minAppVersion": "1.8.0",
   "description": "Manage projects, tasks, meetings, clients and knowledge from a local-first workbench.",
   "author": "xuc",

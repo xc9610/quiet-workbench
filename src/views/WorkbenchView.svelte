@@ -16,7 +16,7 @@
   type SceneId = string;
   type DialogKind = "entity" | "task" | "task-edit" | "migrate" | "knowledge" | null;
   type MoveMode = "move" | "resize";
-  const UI_VERSION = "0.1.1";
+  const UI_VERSION = "0.2.0";
 
   interface SceneDefinition {
     id: SceneId;
@@ -479,11 +479,12 @@
 
   async function submitMigration(): Promise<void> {
     if (!migrationTasks.length || !migrationTarget) return;
+    const targetName = [...snapshot.projects, ...snapshot.clients].find((entry) => entry.path === migrationTarget)?.name ?? migrationTarget;
     const succeeded = await run(
       () => migrationTasks.length === 1
         ? controller.migrateMeetingTask(migrationTasks[0], migrationTarget)
         : controller.migrateMeetingTasks(migrationTasks, migrationTarget),
-      `已处理 ${migrationTasks.length} 条会议行动项`
+      `已迁移 ${migrationTasks.length} 条会议行动项到「${targetName}」，可在任务看板查看`
     );
     if (succeeded) dialog = null;
   }
@@ -550,6 +551,7 @@
         {controller.settings.writesEnabled ? "写入已启用" : "只读诊断"}
       </span>
       <button class="qwb-icon-button" aria-label="刷新工作台" title="刷新" disabled={busy} on:click={() => run(() => controller.refresh(), "已刷新")}>↻</button>
+      <button class="qwb-button qwb-button-subtle" on:click={() => controller.openTaskBoard()}>任务看板</button>
       <button class="qwb-button qwb-button-subtle" disabled={busy} on:click={() => run(() => controller.undoLastTransaction(), "已撤销最近一次操作")}>撤销</button>
     </div>
   </header>

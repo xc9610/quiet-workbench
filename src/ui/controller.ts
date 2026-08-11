@@ -70,6 +70,7 @@ export interface WorkbenchController {
   getSnapshot(): WorkbenchSnapshot;
   subscribe(listener: (snapshot: WorkbenchSnapshot) => void): () => void;
   refresh(): Promise<void>;
+  openTaskBoard(): Promise<void>;
   setActivePath(path?: string): Promise<void>;
   openPath(path: string): Promise<void>;
   createEntity(input: CreateEntityInput): Promise<TransactionReceipt>;

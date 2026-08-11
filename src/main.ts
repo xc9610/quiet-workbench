@@ -9,7 +9,7 @@ import {
 import type { EntityKind, EntityRecord, LayoutItem, LayoutSchema, TaskRecord, TransactionReceipt } from "./core/types";
 import { DiagnosticService, type DiagnosticVaultReader } from "./core/diagnostic";
 import { createBuiltinWidgetRegistry } from "./core/widget-registry";
-import { getDefaultLayouts, validateLayout } from "./core/layout";
+import { getDefaultLayouts, upgradePersistedLayouts, validateLayout } from "./core/layout";
 import {
   EntityIndex,
   MeetingMigrationService,
@@ -43,6 +43,10 @@ import {
   WORKBENCH_VIEW_TYPE,
   WorkbenchItemView
 } from "./views/WorkbenchItemView";
+import {
+  TASK_BOARD_VIEW_TYPE,
+  TaskBoardItemView
+} from "./views/TaskBoardItemView";
 
 interface PersistedPluginData extends Partial<QuietWorkbenchSettings> {
   transactionJournal?: ReturnType<TransactionJournal["serialize"]>;
@@ -152,6 +156,10 @@ class PluginWorkbenchController implements WorkbenchController {
       context: this.buildContext(this.current.context.path)
     };
     this.emit();
+  }
+
+  async openTaskBoard(): Promise<void> {
+    await this.plugin.activateTaskBoard();
   }
 
   async setActivePath(path?: string): Promise<void> {
@@ -461,11 +469,14 @@ export default class QuietWorkbenchPlugin extends Plugin {
     this.controller = new PluginWorkbenchController(this, this.journalData);
 
     this.registerView(WORKBENCH_VIEW_TYPE, (leaf) => new WorkbenchItemView(leaf, this.requireController()));
+    this.registerView(TASK_BOARD_VIEW_TYPE, (leaf) => new TaskBoardItemView(leaf, this.requireController()));
     this.registerView(CONTEXT_PANEL_VIEW_TYPE, (leaf) => new ContextPanelView(leaf, this.requireController()));
     this.addSettingTab(new QuietWorkbenchSettingTab(this.app, this));
 
     this.addRibbonIcon("layout-dashboard", "打开 Quiet Workbench", () => void this.activateWorkbench());
+    this.addRibbonIcon("list-todo", "打开任务看板", () => void this.activateTaskBoard());
     this.addCommand({ id: "open-workbench", name: "打开工作台", callback: () => void this.activateWorkbench() });
+    this.addCommand({ id: "open-task-board", name: "打开任务看板", callback: () => void this.activateTaskBoard() });
     this.addCommand({ id: "open-context-panel", name: "打开上下文侧栏", callback: () => void this.activateContextPanel() });
     this.addCommand({ id: "refresh-workbench", name: "刷新索引并运行诊断", callback: () => void this.refreshWorkbench() });
     this.addCommand({
@@ -500,6 +511,13 @@ export default class QuietWorkbenchPlugin extends Plugin {
     await this.app.workspace.revealLeaf(leaf);
   }
 
+  async activateTaskBoard(): Promise<void> {
+    const existing = this.app.workspace.getLeavesOfType(TASK_BOARD_VIEW_TYPE)[0];
+    const leaf = existing ?? this.app.workspace.getLeaf("tab");
+    if (!existing) await leaf.setViewState({ type: TASK_BOARD_VIEW_TYPE, active: true });
+    await this.app.workspace.revealLeaf(leaf);
+  }
+
   async activateContextPanel(): Promise<void> {
     const existing = this.app.workspace.getLeavesOfType(CONTEXT_PANEL_VIEW_TYPE)[0];
     const leaf = existing ?? this.app.workspace.getRightLeaf(false);
@@ -525,7 +543,7 @@ export default class QuietWorkbenchPlugin extends Plugin {
   private async loadSettings(): Promise<void> {
     const data = (await this.loadData()) as PersistedPluginData | null;
     this.journalData = data?.transactionJournal;
-    const layouts = data?.layouts?.length ? data.layouts : getDefaultLayouts();
+    const layouts = upgradePersistedLayouts(data?.layouts?.length ? data.layouts : getDefaultLayouts());
     this.settings = {
       ...structuredClone(DEFAULT_SETTINGS),
       ...data,

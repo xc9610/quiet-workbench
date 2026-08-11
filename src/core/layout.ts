@@ -58,10 +58,11 @@ const layouts: LayoutSchema[] = [
     surface: "sidebar",
     items: [
       { widgetId: "core.context", x: 0, y: 0, width: 1, height: 3 },
-      { widgetId: "tasks.context", x: 0, y: 3, width: 1, height: 4 },
-      { widgetId: "projects.context", x: 0, y: 7, width: 1, height: 3 },
-      { widgetId: "meetings.context", x: 0, y: 10, width: 1, height: 3 },
-      { widgetId: "core.quick-create", x: 0, y: 13, width: 1, height: 2 }
+      { widgetId: "tasks.upcoming", x: 0, y: 3, width: 1, height: 4 },
+      { widgetId: "tasks.context", x: 0, y: 7, width: 1, height: 4 },
+      { widgetId: "projects.context", x: 0, y: 11, width: 1, height: 3 },
+      { widgetId: "meetings.context", x: 0, y: 14, width: 1, height: 3 },
+      { widgetId: "core.quick-create", x: 0, y: 17, width: 1, height: 2 }
     ]
   }
 ];
@@ -82,6 +83,39 @@ export function cloneLayout(layout: LayoutSchema): LayoutSchema {
 
 export function getDefaultLayouts(): LayoutSchema[] {
   return layouts.map(cloneLayout);
+}
+
+/** Adds newly introduced built-in sidebar widgets without discarding user layout changes. */
+export function upgradePersistedLayouts(persisted: LayoutSchema[]): LayoutSchema[] {
+  return persisted.map((layout) => {
+    const upgraded = cloneLayout(layout);
+    if (
+      upgraded.id !== "sidebar-default" ||
+      upgraded.surface !== "sidebar" ||
+      upgraded.items.some((item) => item.widgetId === "tasks.upcoming") ||
+      !isLegacyDefaultSidebar(upgraded)
+    ) {
+      return upgraded;
+    }
+    upgraded.items = upgraded.items.map((item) => item.y >= 3 ? { ...item, y: item.y + 4 } : item);
+    upgraded.items.push({ widgetId: "tasks.upcoming", x: 0, y: 3, width: 1, height: 4 });
+    return upgraded;
+  });
+}
+
+function isLegacyDefaultSidebar(layout: LayoutSchema): boolean {
+  const expected = new Map<string, readonly [number, number, number, number]>([
+    ["core.context", [0, 0, 1, 3]],
+    ["tasks.context", [0, 3, 1, 4]],
+    ["projects.context", [0, 7, 1, 3]],
+    ["meetings.context", [0, 10, 1, 3]],
+    ["core.quick-create", [0, 13, 1, 2]]
+  ]);
+  if (layout.items.length !== expected.size) return false;
+  return layout.items.every((item) => {
+    const position = expected.get(item.widgetId);
+    return Boolean(position && item.x === position[0] && item.y === position[1] && item.width === position[2] && item.height === position[3]);
+  });
 }
 
 export function validateLayout(

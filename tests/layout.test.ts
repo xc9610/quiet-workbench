@@ -5,6 +5,7 @@ import {
   importLayout,
   LayoutManager,
   reorderMobileLayout,
+  upgradePersistedLayouts,
   updateLayoutItem,
   validateLayout
 } from "../src/core/layout";
@@ -36,6 +37,34 @@ describe("default layouts", () => {
     const second = getDefaultLayouts();
     expect(second[0].name).toBe("今日执行");
     expect(second[0].items[0].x).toBe(0);
+  });
+
+  it("adds upcoming tasks to old sidebar layouts without losing existing items", () => {
+    const oldLayouts = getDefaultLayouts();
+    const sidebar = oldLayouts.find((layout) => layout.id === "sidebar-default")!;
+    sidebar.items = sidebar.items.filter((item) => item.widgetId !== "tasks.upcoming");
+    sidebar.items = sidebar.items.map((item) => item.y > 3 ? { ...item, y: item.y - 4 } : item);
+
+    const upgraded = upgradePersistedLayouts(oldLayouts);
+    const upgradedSidebar = upgraded.find((layout) => layout.id === "sidebar-default")!;
+    expect(upgradedSidebar.items.filter((item) => item.widgetId === "tasks.upcoming")).toHaveLength(1);
+    expect(upgradedSidebar.items.find((item) => item.widgetId === "tasks.context")?.y).toBe(7);
+    expect(upgradePersistedLayouts(upgraded).find((layout) => layout.id === "sidebar-default")?.items).toEqual(upgradedSidebar.items);
+  });
+
+  it("does not rewrite custom sidebars or re-add an explicitly removed upcoming widget", () => {
+    const custom: ReturnType<typeof getDefaultLayouts>[number] = {
+      version: 1,
+      id: "custom-sidebar",
+      name: "自定义侧栏",
+      surface: "sidebar",
+      items: [{ widgetId: "core.context", x: 0, y: 2, width: 1, height: 4 }]
+    };
+    expect(upgradePersistedLayouts([custom])).toEqual([custom]);
+
+    const upgradedDefault = getDefaultLayouts().find((layout) => layout.id === "sidebar-default")!;
+    upgradedDefault.items = upgradedDefault.items.filter((item) => item.widgetId !== "tasks.upcoming");
+    expect(upgradePersistedLayouts([upgradedDefault])[0].items.some((item) => item.widgetId === "tasks.upcoming")).toBe(false);
   });
 });
 
