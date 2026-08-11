@@ -9,6 +9,7 @@ Markdown files.
 - The first launch is read-only.
 - Business writes must be enabled explicitly in settings.
 - Multi-file changes use preflight checks, receipts, and compensating restore.
+- Configured template files are protected by the transaction layer and are always read-only.
 - The plugin has no telemetry, accounts, network calls, or self-updater.
 
 ## Local installation

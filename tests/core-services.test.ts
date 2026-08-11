@@ -123,6 +123,31 @@ describe("TemplateService", () => {
       UnsupportedTemplateExpressionError
     );
   });
+
+  it("preserves template fields, sections, and DataviewJS while rendering supported placeholders", () => {
+    const service = new TemplateService();
+    const template = [
+      "---",
+      "type: 客户",
+      "custom_field: keep-me",
+      "created: <% tp.date.now(\"YYYY-MM-DD\") %>",
+      "---",
+      "# <% tp.file.title %>",
+      "## 自定义章节",
+      "```dataviewjs",
+      "const current = dv.current();",
+      "dv.paragraph(current.custom_field);",
+      "```"
+    ].join("\n");
+
+    const rendered = service.render(template, { title: "客户甲", now: new Date(2026, 7, 11, 12) });
+    expect(rendered).toContain("custom_field: keep-me");
+    expect(rendered).toContain("## 自定义章节");
+    expect(rendered).toContain("const current = dv.current();");
+    expect(rendered).toContain("dv.paragraph(current.custom_field);");
+    expect(rendered).toContain("# 客户甲");
+    expect(rendered).toContain("created: 2026-08-11");
+  });
 });
 
 describe("EntityIndex", () => {
@@ -177,6 +202,61 @@ describe("EntityIndex", () => {
 });
 
 describe("WriteTransactionExecutor", () => {
+  it("keeps configured template files read-only during writes and undo", async () => {
+    const vault = new MemoryVault();
+    vault.seed("templates/project.md", "template-v1");
+    vault.seed("projects/a.md", "before");
+    const protectedPaths = new Set(["templates/project.md"]);
+    const executor = new WriteTransactionExecutor(vault, new TransactionJournal(), {
+      isPathProtected: (path) => protectedPaths.has(path),
+      idFactory: (() => {
+        let id = 0;
+        return () => `protected-${++id}`;
+      })()
+    });
+
+    const blocked = await executor.execute({
+      label: "must not touch template",
+      operations: [
+        { kind: "write", path: "projects/a.md", content: "after" },
+        { kind: "write", path: "templates/project.md", content: "template-v2" }
+      ]
+    });
+    expect(blocked.status).toBe("failed");
+    expect(blocked.messages.join(" ")).toContain("Protected file is read-only");
+    expect(await vault.read("projects/a.md")).toBe("before");
+    expect(await vault.read("templates/project.md")).toBe("template-v1");
+
+    protectedPaths.clear();
+    const committed = await executor.execute({
+      label: "ordinary business write",
+      operations: [{ kind: "write", path: "projects/a.md", content: "after" }]
+    });
+    protectedPaths.add("projects/a.md");
+    const blockedUndo = await executor.undo(committed.id);
+    expect(blockedUndo.status).toBe("failed");
+    expect(await vault.read("projects/a.md")).toBe("after");
+  });
+
+  it("does not trash a created file that later becomes a protected template", async () => {
+    const vault = new MemoryVault();
+    const protectedPaths = new Set<string>();
+    const executor = new WriteTransactionExecutor(vault, new TransactionJournal(), {
+      isPathProtected: (path) => protectedPaths.has(path),
+      idFactory: () => "protected-create"
+    });
+
+    const committed = await executor.execute({
+      label: "create ordinary file",
+      operations: [{ kind: "create", path: "projects/new.md", content: "new" }]
+    });
+    protectedPaths.add("projects/new.md");
+
+    const blockedUndo = await executor.undo(committed.id);
+    expect(blockedUndo.status).toBe("failed");
+    expect(await vault.read("projects/new.md")).toBe("new");
+  });
+
   it("commits, records, and safely undoes a write", async () => {
     const vault = new MemoryVault();
     vault.seed("a.md", "before");

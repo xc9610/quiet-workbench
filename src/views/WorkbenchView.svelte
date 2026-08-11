@@ -16,7 +16,7 @@
   type SceneId = string;
   type DialogKind = "entity" | "task" | "task-edit" | "migrate" | "knowledge" | null;
   type MoveMode = "move" | "resize";
-  const UI_VERSION = "0.2.0";
+  const UI_VERSION = "0.2.1";
 
   interface SceneDefinition {
     id: SceneId;

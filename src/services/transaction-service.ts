@@ -15,6 +15,8 @@ export interface TransactionExecutorOptions {
   now?: () => Date;
   idFactory?: () => string;
   onStatus?: (status: TransactionStatus, receipt: DetailedTransactionReceipt) => void;
+  /** Dynamic guard for files that must remain read-only, such as configured templates. */
+  isPathProtected?: (path: string) => boolean;
 }
 
 export class TransactionJournal {
@@ -108,6 +110,7 @@ export class WriteTransactionExecutor {
     const applied: TransactionSnapshot[] = [];
     try {
       for (const snapshot of snapshots) {
+        this.assertMutablePath(snapshot.path);
         if (snapshot.kind === "create") await this.vault.create(snapshot.path, snapshot.after);
         else await this.vault.write(snapshot.path, snapshot.after, contentRevision(snapshot.before ?? ""));
         applied.push(snapshot);
@@ -140,6 +143,12 @@ export class WriteTransactionExecutor {
     );
     this.emit("preflight", receipt);
     for (const snapshot of stored.snapshots) {
+      if (this.options.isPathProtected?.(normalizeVaultPath(snapshot.path))) {
+        receipt.messages.push(`Cannot undo because the protected file is read-only: ${snapshot.path}`);
+        this.finish(receipt, "failed");
+        this.journal.add({ receipt, snapshots: [] });
+        return structuredClone(receipt);
+      }
       if (!(await this.vault.exists(snapshot.path))) {
         receipt.messages.push(`Cannot undo because ${snapshot.path} no longer exists.`);
         this.finish(receipt, "failed");
@@ -161,11 +170,13 @@ export class WriteTransactionExecutor {
       const writes = stored.snapshots.filter((snapshot) => snapshot.kind === "write").reverse();
       const creates = stored.snapshots.filter((snapshot) => snapshot.kind === "create").reverse();
       for (const snapshot of writes) {
+        this.assertMutablePath(snapshot.path);
         await this.vault.write(snapshot.path, snapshot.before ?? "", contentRevision(snapshot.after));
         restored.push(snapshot);
         receipt.restoredPaths.push(snapshot.path);
       }
       for (const snapshot of creates) {
+        this.assertMutablePath(snapshot.path);
         await this.vault.trash(snapshot.path);
         restored.push(snapshot);
         receipt.restoredPaths.push(snapshot.path);
@@ -181,6 +192,7 @@ export class WriteTransactionExecutor {
       }
       for (const snapshot of restored.filter((entry) => entry.kind === "write").reverse()) {
         try {
+          this.assertMutablePath(snapshot.path);
           const current = await this.vault.read(snapshot.path);
           if (contentRevision(current) !== contentRevision(snapshot.before ?? "")) {
             receipt.unresolvedPaths.push(snapshot.path);
@@ -203,6 +215,7 @@ export class WriteTransactionExecutor {
     const snapshots: TransactionSnapshot[] = [];
     for (const operation of plan.operations) {
       const path = normalizeVaultPath(operation.path);
+      this.assertMutablePath(path);
       if (seen.has(path)) throw new TransactionPreflightError(`Transaction contains duplicate path: ${path}`, path);
       seen.add(path);
       const exists = await this.vault.exists(path);
@@ -225,6 +238,7 @@ export class WriteTransactionExecutor {
   private async compensate(applied: TransactionSnapshot[], receipt: DetailedTransactionReceipt): Promise<void> {
     for (const snapshot of [...applied].reverse()) {
       try {
+        this.assertMutablePath(snapshot.path);
         if (!(await this.vault.exists(snapshot.path))) throw new Error("file is missing");
         const current = await this.vault.read(snapshot.path);
         if (contentRevision(current) !== contentRevision(snapshot.after)) throw new Error("file changed after commit");
@@ -241,6 +255,13 @@ export class WriteTransactionExecutor {
   private emit(status: TransactionStatus, receipt: DetailedTransactionReceipt): void {
     receipt.status = status;
     this.options.onStatus?.(status, structuredClone(receipt));
+  }
+
+  private assertMutablePath(path: string): void {
+    const normalized = normalizeVaultPath(path);
+    if (this.options.isPathProtected?.(normalized)) {
+      throw new TransactionPreflightError(`Protected file is read-only: ${normalized}`, normalized);
+    }
   }
 
   private finish(receipt: DetailedTransactionReceipt, status: TransactionStatus): void {

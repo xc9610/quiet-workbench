@@ -96,7 +96,9 @@ class PluginWorkbenchController implements WorkbenchController {
         console.warn("Quiet Workbench: ignored invalid transaction journal", error);
       }
     }
-    this.transactions = new WriteTransactionExecutor(this.vaultPort, this.journal);
+    this.transactions = new WriteTransactionExecutor(this.vaultPort, this.journal, {
+      isPathProtected: (path) => this.isConfiguredTemplatePath(path)
+    });
     this.tasks = new ProjectTaskService(this.vaultPort, this.transactions);
     this.meetingMigrations = new MeetingMigrationService(this.vaultPort, this.transactions);
     this.diagnostics = new DiagnosticService(new ObsidianDiagnosticReader(this.vaultPort));
@@ -426,6 +428,18 @@ class PluginWorkbenchController implements WorkbenchController {
     throw new Error("会议行动项只能迁移到已索引的项目或客户笔记。");
   }
 
+  private isConfiguredTemplatePath(path: string): boolean {
+    const normalized = comparableVaultPath(path);
+    return Object.values(this.plugin.settings.templates).some((templatePath) => {
+      if (!templatePath.trim()) return false;
+      try {
+        return comparableVaultPath(templatePath) === normalized;
+      } catch {
+        return false;
+      }
+    });
+  }
+
   private folderForKind(kind: Exclude<EntityKind, "knowledge">): string {
     const key: Record<typeof kind, keyof Pick<QuietWorkbenchSettings, "projectFolder" | "clientFolder" | "meetingFolder" | "supplierFolder">> = {
       project: "projectFolder",
@@ -547,7 +561,7 @@ export default class QuietWorkbenchPlugin extends Plugin {
     this.settings = {
       ...structuredClone(DEFAULT_SETTINGS),
       ...data,
-      templates: { ...DEFAULT_SETTINGS.templates, ...data?.templates },
+      templates: normalizeTemplatePaths({ ...DEFAULT_SETTINGS.templates, ...data?.templates }),
       clientAliases: { ...DEFAULT_SETTINGS.clientAliases, ...data?.clientAliases },
       enabledPacks: { ...DEFAULT_SETTINGS.enabledPacks, ...data?.enabledPacks },
       layouts
@@ -666,4 +680,16 @@ function sceneName(sceneId: string): string {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function comparableVaultPath(path: string): string {
+  return normalizeVaultPath(normalizePath(path)).normalize("NFC").toLowerCase();
+}
+
+function normalizeTemplatePaths(
+  templates: QuietWorkbenchSettings["templates"]
+): QuietWorkbenchSettings["templates"] {
+  return Object.fromEntries(
+    Object.entries(templates).map(([kind, path]) => [kind, normalizePath(path.trim())])
+  ) as QuietWorkbenchSettings["templates"];
 }
