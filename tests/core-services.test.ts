@@ -345,7 +345,9 @@ describe("project tasks and meeting migration", () => {
     const first = await service.migrate({ sourceTask: source, targetPath: "projects/p.md", targetScope: "project" });
     expect(first.outcome).toBe("migrated");
     expect(await vault.read("projects/p.md")).toContain("quiet-workbench:source");
+    vault.seed("meetings/m.md", (await vault.read("meetings/m.md")).replace("- [x]", "- [ ]"));
     const refreshed = parseSingleTask(await vault.read("meetings/m.md"), "meetings/m.md", "meeting-draft");
+    expect(refreshed.migrated).toBe(true);
     const second = await service.migrate({ sourceTask: refreshed, targetPath: "projects/p.md", targetScope: "project" });
     expect(second.outcome).toBe("already-migrated");
     expect((await vault.read("projects/p.md")).match(/确认接口/g)).toHaveLength(1);

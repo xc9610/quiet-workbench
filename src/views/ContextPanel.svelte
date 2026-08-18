@@ -3,6 +3,7 @@
   import type { TaskRecord } from "../core/types";
   import { formatDate } from "../services/template-service";
   import type { WorkbenchController, WorkbenchSnapshot } from "../ui/controller";
+  import { layoutItemKey } from "../core/layout";
   import { EMPTY_SNAPSHOT } from "../ui/controller";
 
   export let controller: WorkbenchController;
@@ -47,7 +48,7 @@
 </script>
 
 <div class="qwb-context">
-  {#each sidebarItems() as item (item.widgetId)}
+  {#each sidebarItems() as item (layoutItemKey(item))}
     {#if item.widgetId === "core.context"}
       <header class:collapsed={item.collapsed}>
         <span class="qwb-eyebrow">CURRENT CONTEXT</span>

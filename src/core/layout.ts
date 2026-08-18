@@ -1,5 +1,6 @@
 import type { LayoutItem, LayoutSchema, WorkbenchSurface } from "./types";
 import type { WidgetRegistry } from "./widget-registry";
+import { migrateLegacyWidgetItem } from "./widget-model";
 
 export interface LayoutValidationIssue {
   path: string;
@@ -12,6 +13,10 @@ export type LayoutValidationResult =
 
 export type LayoutDevice = "desktop" | "mobile";
 
+export function layoutItemKey(item: Pick<LayoutItem, "widgetId" | "instanceId">): string {
+  return item.instanceId?.trim() || item.widgetId;
+}
+
 const layouts: LayoutSchema[] = [
   {
     version: 1,
@@ -19,10 +24,10 @@ const layouts: LayoutSchema[] = [
     name: "今日执行",
     surface: "workbench",
     items: [
-      { widgetId: "tasks.today", x: 0, y: 0, width: 6, height: 5 },
-      { widgetId: "core.calendar", x: 6, y: 0, width: 3, height: 5 },
-      { widgetId: "core.quick-create", x: 9, y: 0, width: 3, height: 2 },
-      { widgetId: "projects.recent", x: 9, y: 2, width: 3, height: 3 }
+      { widgetId: "tasks.today", x: 0, y: 0, width: 8, height: 7 },
+      { widgetId: "capture.memo", x: 8, y: 0, width: 4, height: 3 },
+      { widgetId: "core.quick-create", x: 8, y: 3, width: 4, height: 2 },
+      { widgetId: "projects.recent", x: 8, y: 5, width: 4, height: 3 }
     ]
   },
   {
@@ -76,30 +81,55 @@ export function cloneLayout(layout: LayoutSchema): LayoutSchema {
     ...layout,
     items: layout.items.map((item) => ({
       ...item,
-      config: item.config ? { ...item.config } : undefined
+      config: item.config ? structuredClone(item.config) : undefined
     }))
   };
 }
 
 export function getDefaultLayouts(): LayoutSchema[] {
-  return layouts.map(cloneLayout);
+  return layouts.map((layout) => migrateLayoutWidgets(cloneLayout(layout)));
 }
 
 /** Adds newly introduced built-in sidebar widgets without discarding user layout changes. */
 export function upgradePersistedLayouts(persisted: LayoutSchema[]): LayoutSchema[] {
   return persisted.map((layout) => {
     const upgraded = cloneLayout(layout);
+    if (isLegacyDefaultToday(upgraded)) {
+      return migrateLayoutWidgets(cloneLayout(layouts.find((candidate) => candidate.id === "today")!));
+    }
     if (
       upgraded.id !== "sidebar-default" ||
       upgraded.surface !== "sidebar" ||
       upgraded.items.some((item) => item.widgetId === "tasks.upcoming") ||
       !isLegacyDefaultSidebar(upgraded)
     ) {
-      return upgraded;
+      return migrateLayoutWidgets(upgraded);
     }
     upgraded.items = upgraded.items.map((item) => item.y >= 3 ? { ...item, y: item.y + 4 } : item);
     upgraded.items.push({ widgetId: "tasks.upcoming", x: 0, y: 3, width: 1, height: 4 });
-    return upgraded;
+    return migrateLayoutWidgets(upgraded);
+  });
+}
+
+function migrateLayoutWidgets(layout: LayoutSchema): LayoutSchema {
+  return {
+    ...layout,
+    items: layout.items.map((item, index) => migrateLegacyWidgetItem(item, index))
+  };
+}
+
+function isLegacyDefaultToday(layout: LayoutSchema): boolean {
+  if (layout.id !== "today" || layout.surface !== "workbench") return false;
+  const expected = new Map<string, readonly [number, number, number, number]>([
+    ["tasks.today", [0, 0, 6, 5]],
+    ["core.calendar", [6, 0, 3, 5]],
+    ["core.quick-create", [9, 0, 3, 2]],
+    ["projects.recent", [9, 2, 3, 3]]
+  ]);
+  if (layout.items.length !== expected.size) return false;
+  return layout.items.every((item) => {
+    const position = expected.get(item.widgetId);
+    return Boolean(position && item.x === position[0] && item.y === position[1] && item.width === position[2] && item.height === position[3]);
   });
 }
 
@@ -138,7 +168,7 @@ export function validateLayout(
   if (!Array.isArray(value.items)) {
     issues.push({ path: "items", message: "Items must be an array" });
   } else {
-    const widgetIds = new Set<string>();
+    const instanceIds = new Set<string>();
     value.items.forEach((raw, index) => {
       const path = `items[${index}]`;
       if (!isRecord(raw)) {
@@ -146,6 +176,11 @@ export function validateLayout(
         return;
       }
       validateString(raw.widgetId, `${path}.widgetId`, issues);
+      if (raw.instanceId !== undefined) {
+        validateString(raw.instanceId, `${path}.instanceId`, issues, /^[a-z0-9][a-z0-9.-]*$/);
+      }
+      if (raw.title !== undefined) validateString(raw.title, `${path}.title`, issues);
+      if (raw.presetId !== undefined) validateString(raw.presetId, `${path}.presetId`, issues, /^[a-z0-9][a-z0-9.-]*$/);
       for (const key of ["x", "y", "width", "height"] as const) {
         const field = raw[key];
         if (!Number.isInteger(field) || (key.startsWith("w") || key.startsWith("h") ? Number(field) <= 0 : Number(field) < 0)) {
@@ -172,10 +207,13 @@ export function validateLayout(
         issues.push({ path, message: "Sidebar items must use the single-column grid" });
       }
       if (typeof raw.widgetId === "string") {
-        if (widgetIds.has(raw.widgetId)) {
-          issues.push({ path: `${path}.widgetId`, message: "A widget may appear only once per layout" });
+        const instanceId = typeof raw.instanceId === "string" && raw.instanceId.trim()
+          ? raw.instanceId.trim()
+          : raw.widgetId;
+        if (instanceIds.has(instanceId)) {
+          issues.push({ path: `${path}.instanceId`, message: "Widget instance IDs must be unique within a layout" });
         }
-        widgetIds.add(raw.widgetId);
+        instanceIds.add(instanceId);
         const definition = registry.get(raw.widgetId);
         if (!definition) {
           issues.push({ path: `${path}.widgetId`, message: `Unknown widget: ${raw.widgetId}` });
@@ -236,7 +274,7 @@ export function adaptLayoutForDevice(
         x: 0,
         y,
         width: 1,
-        config: item.config ? { ...item.config } : undefined
+        config: item.config ? structuredClone(item.config) : undefined
       };
       y += item.collapsed ? 1 : Math.max(1, item.height);
       return result;
@@ -246,44 +284,43 @@ export function adaptLayoutForDevice(
 
 export function updateLayoutItem(
   layout: LayoutSchema,
-  widgetId: string,
-  patch: Partial<Omit<LayoutItem, "widgetId">>
+  instanceId: string,
+  patch: Partial<Omit<LayoutItem, "widgetId" | "instanceId">>
 ): LayoutSchema {
   let found = false;
   const updated = cloneLayout(layout);
   updated.items = updated.items.map((item) => {
-    if (item.widgetId !== widgetId) return item;
+    if (layoutItemKey(item) !== instanceId) return item;
     found = true;
     return {
       ...item,
       ...patch,
-      widgetId,
       config: patch.config ? { ...patch.config } : item.config
     };
   });
-  if (!found) throw new Error(`Widget is not in layout: ${widgetId}`);
+  if (!found) throw new Error(`Widget instance is not in layout: ${instanceId}`);
   return updated;
 }
 
 /** Returns a mobile projection; it does not overwrite the desktop coordinates. */
 export function reorderMobileLayout(
   layout: LayoutSchema,
-  orderedWidgetIds: string[]
+  orderedInstanceIds: string[]
 ): LayoutSchema {
-  const existing = new Set(layout.items.map((item) => item.widgetId));
+  const existing = new Set(layout.items.map(layoutItemKey));
   if (
-    orderedWidgetIds.length !== existing.size ||
-    new Set(orderedWidgetIds).size !== existing.size ||
-    orderedWidgetIds.some((id) => !existing.has(id))
+    orderedInstanceIds.length !== existing.size ||
+    new Set(orderedInstanceIds).size !== existing.size ||
+    orderedInstanceIds.some((id) => !existing.has(id))
   ) {
     throw new Error("Mobile order must contain every layout widget exactly once");
   }
-  const byId = new Map(layout.items.map((item) => [item.widgetId, item]));
+  const byId = new Map(layout.items.map((item) => [layoutItemKey(item), item]));
   const reordered = cloneLayout(layout);
   let y = 0;
-  reordered.items = orderedWidgetIds.map((id) => {
+  reordered.items = orderedInstanceIds.map((id) => {
     const item = byId.get(id)!;
-    const next = { ...item, x: 0, y, width: 1, config: item.config ? { ...item.config } : undefined };
+    const next = { ...item, x: 0, y, width: 1, config: item.config ? structuredClone(item.config) : undefined };
     y += item.collapsed ? 1 : Math.max(1, item.height);
     return next;
   });
@@ -346,10 +383,10 @@ export class LayoutManager {
 
   updateItem(
     id: string,
-    widgetId: string,
-    patch: Partial<Omit<LayoutItem, "widgetId">>
+    instanceId: string,
+    patch: Partial<Omit<LayoutItem, "widgetId" | "instanceId">>
   ): LayoutSchema {
-    return this.save(updateLayoutItem(this.require(id), widgetId, patch), true);
+    return this.save(updateLayoutItem(this.require(id), instanceId, patch), true);
   }
 
   restoreDefault(id: string): LayoutSchema {

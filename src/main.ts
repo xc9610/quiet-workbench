@@ -24,6 +24,7 @@ import {
   type VaultPort
 } from "./services";
 import { DEFAULT_SETTINGS, type QuietWorkbenchSettings } from "./settings";
+import { appendQuickMemoContent, normalizeQuickMemoEntry, recentQuickMemoEntries } from "./domain/memo";
 import { QuietWorkbenchSettingTab } from "./settings-tab";
 import type {
   AddProjectTaskInput,
@@ -49,8 +50,11 @@ import {
 } from "./views/TaskBoardItemView";
 
 interface PersistedPluginData extends Partial<QuietWorkbenchSettings> {
+  settingsSchemaVersion?: number;
   transactionJournal?: ReturnType<TransactionJournal["serialize"]>;
 }
+
+const CURRENT_SETTINGS_SCHEMA_VERSION = 1;
 
 class ObsidianDiagnosticReader implements DiagnosticVaultReader {
   constructor(private readonly vault: VaultPort) {}
@@ -85,6 +89,7 @@ class PluginWorkbenchController implements WorkbenchController {
   private index: EntityIndex;
   private indexSignature: string;
   private current: WorkbenchSnapshot = structuredClone(EMPTY_SNAPSHOT);
+  private disposed = false;
 
   constructor(private readonly plugin: QuietWorkbenchPlugin, journalData?: PersistedPluginData["transactionJournal"]) {
     this.vaultPort = new ObsidianVaultAdapter(plugin.app.vault, plugin.app.fileManager);
@@ -115,20 +120,23 @@ class PluginWorkbenchController implements WorkbenchController {
   }
 
   subscribe(listener: (snapshot: WorkbenchSnapshot) => void): () => void {
+    if (this.disposed) return () => undefined;
     this.listeners.add(listener);
     listener(this.current);
     return () => this.listeners.delete(listener);
   }
 
   async refresh(): Promise<void> {
+    if (this.disposed) return;
     const nextSignature = this.makeIndexSignature();
     if (nextSignature !== this.indexSignature) {
       this.index = this.createIndex();
       this.indexSignature = nextSignature;
     }
-    const [update, report] = await Promise.all([
+    const [update, report, memo] = await Promise.all([
       this.index.scan(),
-      this.diagnostics.run(this.plugin.settings)
+      this.diagnostics.run(this.plugin.settings),
+      this.readQuickMemo()
     ]);
     const diagnostics: DiagnosticItem[] = report.items.map((item) => ({
       id: item.id,
@@ -144,6 +152,14 @@ class PluginWorkbenchController implements WorkbenchController {
         status: "error" as const
       }))
     );
+    if (memo.error) {
+      diagnostics.push({
+        id: "memo.path",
+        label: "速记不可用",
+        detail: memo.error,
+        status: "warning"
+      });
+    }
     this.current = {
       ...this.current,
       scannedAt: Date.now(),
@@ -155,6 +171,7 @@ class PluginWorkbenchController implements WorkbenchController {
       knowledge: this.summaries("knowledge"),
       tasks: this.index.listTasks(),
       transactionHistory: this.journal.list(),
+      memo,
       context: this.buildContext(this.current.context.path)
     };
     this.emit();
@@ -276,6 +293,44 @@ class PluginWorkbenchController implements WorkbenchController {
     return receipt;
   }
 
+  async appendQuickMemo(text: string): Promise<TransactionReceipt> {
+    this.requireWrites();
+    const configuredPath = this.plugin.settings.memoPath.trim();
+    if (!configuredPath) throw new Error("请先在 Quiet Workbench 设置中配置速记文件。");
+    const path = normalizeVaultPath(configuredPath);
+    const entry = normalizeQuickMemoEntry(text);
+    const exists = await this.vaultPort.exists(path);
+    const before = exists ? await this.vaultPort.read(path) : "";
+    const content = appendQuickMemoContent(before, entry);
+    const receipt = await this.transactions.execute({
+      label: "Append quick memo",
+      operations: [exists
+        ? { kind: "write", path, content, expectedRevision: contentRevision(before) }
+        : { kind: "create", path, content }]
+    });
+    await this.afterReceipt(receipt);
+    return receipt;
+  }
+
+  async openYolo(path?: string): Promise<void> {
+    if (path) {
+      const file = this.plugin.app.vault.getAbstractFileByPath(normalizePath(path));
+      if (!(file instanceof TFile)) throw new Error(`文件不存在：${path}`);
+      const leaf = this.plugin.app.workspace.getLeaf("tab");
+      await leaf.openFile(file);
+      await this.plugin.app.workspace.revealLeaf(leaf);
+    }
+    const commands = (this.plugin.app as typeof this.plugin.app & {
+      commands?: { executeCommandById(id: string): boolean };
+    }).commands;
+    const commandId = path ? "yolo:new-chat-current-view" : "yolo:open-new-chat";
+    const opened = commands?.executeCommandById(commandId)
+      || (path ? commands?.executeCommandById("yolo:open-new-chat") : false);
+    if (!opened) {
+      throw new Error("YOLO 未安装、未启用，或没有提供“打开新对话”命令。");
+    }
+  }
+
   async saveLayout(sceneId: string, items: LayoutItem[]): Promise<void> {
     const registry = createBuiltinWidgetRegistry();
     const candidate: LayoutSchema = {
@@ -283,7 +338,7 @@ class PluginWorkbenchController implements WorkbenchController {
       id: sceneId,
       name: this.plugin.settings.layouts.find((layout) => layout.id === sceneId)?.name ?? sceneName(sceneId),
       surface: "workbench",
-      items: items.map((item) => ({ ...item, config: item.config ? { ...item.config } : undefined }))
+      items: items.map((item) => ({ ...item, config: item.config ? structuredClone(item.config) : undefined }))
     };
     const result = validateLayout(candidate, registry);
     if (!result.valid) throw new Error(result.issues.map((issue) => `${issue.path}: ${issue.message}`).join("；"));
@@ -353,6 +408,11 @@ class PluginWorkbenchController implements WorkbenchController {
 
   async persistJournal(): Promise<void> {
     await this.plugin.saveSettings(this.journal.serialize());
+  }
+
+  dispose(): void {
+    this.disposed = true;
+    this.listeners.clear();
   }
 
   private createIndex(): EntityIndex {
@@ -451,6 +511,7 @@ class PluginWorkbenchController implements WorkbenchController {
   }
 
   private requireWrites(): void {
+    if (this.disposed) throw new Error("Quiet Workbench 已重载，请关闭当前旧页面后重新打开。");
     if (!this.plugin.settings.writesEnabled) {
       throw new Error("当前为只读诊断模式。请先在 Quiet Workbench 设置中明确启用写入。");
     }
@@ -467,6 +528,19 @@ class PluginWorkbenchController implements WorkbenchController {
     }
   }
 
+  private async readQuickMemo(): Promise<WorkbenchSnapshot["memo"]> {
+    const configuredPath = this.plugin.settings.memoPath.trim();
+    if (!configuredPath) return { path: "", exists: false, recent: [], error: "尚未配置速记文件路径。" };
+    try {
+      const path = normalizeVaultPath(configuredPath);
+      if (!(await this.vaultPort.exists(path))) return { path, exists: false, recent: [] };
+      const content = await this.vaultPort.read(path);
+      return { path, exists: true, recent: recentQuickMemoEntries(content) };
+    } catch (error) {
+      return { path: configuredPath, exists: false, recent: [], error: `无法读取速记文件：${errorMessage(error)}` };
+    }
+  }
+
   private emit(): void {
     for (const listener of this.listeners) listener(this.current);
   }
@@ -476,6 +550,7 @@ export default class QuietWorkbenchPlugin extends Plugin {
   settings: QuietWorkbenchSettings = structuredClone(DEFAULT_SETTINGS);
   private controller?: PluginWorkbenchController;
   private refreshTimer?: number;
+  private startupRefreshTimer?: number;
   private journalData?: PersistedPluginData["transactionJournal"];
 
   async onload(): Promise<void> {
@@ -506,16 +581,23 @@ export default class QuietWorkbenchPlugin extends Plugin {
     this.registerEvent(this.app.vault.on("rename", (file) => this.scheduleRefresh(file)));
     this.register(() => {
       if (this.refreshTimer !== undefined) window.clearTimeout(this.refreshTimer);
+      if (this.startupRefreshTimer !== undefined) window.clearTimeout(this.startupRefreshTimer);
     });
 
     this.app.workspace.onLayoutReady(() => {
-      void this.refreshWorkbench();
-      void this.syncActiveFile();
+      void this.rebindStaleViews().then(() => Promise.all([
+        this.refreshWorkbench(),
+        this.syncActiveFile()
+      ])).catch((error) => console.error("Quiet Workbench view rebind failed", error));
+      this.startupRefreshTimer = window.setTimeout(() => void this.refreshWorkbench(), 800);
     });
   }
 
   onunload(): void {
-    if (this.controller) void this.controller.persistJournal();
+    if (this.controller) {
+      this.controller.dispose();
+      void this.controller.persistJournal();
+    }
   }
 
   async activateWorkbench(): Promise<void> {
@@ -551,7 +633,11 @@ export default class QuietWorkbenchPlugin extends Plugin {
 
   async saveSettings(journal = this.journalData): Promise<void> {
     this.journalData = journal;
-    await this.saveData({ ...this.settings, transactionJournal: journal });
+    await this.saveData({
+      ...this.settings,
+      settingsSchemaVersion: CURRENT_SETTINGS_SCHEMA_VERSION,
+      transactionJournal: journal
+    });
   }
 
   private async loadSettings(): Promise<void> {
@@ -566,6 +652,13 @@ export default class QuietWorkbenchPlugin extends Plugin {
       enabledPacks: { ...DEFAULT_SETTINGS.enabledPacks, ...data?.enabledPacks },
       layouts
     };
+    if (data && data.settingsSchemaVersion !== CURRENT_SETTINGS_SCHEMA_VERSION) {
+      await this.saveData({
+        ...this.settings,
+        settingsSchemaVersion: CURRENT_SETTINGS_SCHEMA_VERSION,
+        transactionJournal: this.journalData
+      });
+    }
   }
 
   private async syncActiveFile(): Promise<void> {
@@ -576,6 +669,32 @@ export default class QuietWorkbenchPlugin extends Plugin {
     if (!(file instanceof TFile || file instanceof TFolder)) return;
     if (this.refreshTimer !== undefined) window.clearTimeout(this.refreshTimer);
     this.refreshTimer = window.setTimeout(() => void this.refreshWorkbench(), 350);
+  }
+
+  private async rebindStaleViews(): Promise<void> {
+    const controller = this.requireController();
+    const entries = [
+      {
+        type: WORKBENCH_VIEW_TYPE,
+        current: (view: unknown) => view instanceof WorkbenchItemView && view.usesController(controller)
+      },
+      {
+        type: TASK_BOARD_VIEW_TYPE,
+        current: (view: unknown) => view instanceof TaskBoardItemView && view.usesController(controller)
+      },
+      {
+        type: CONTEXT_PANEL_VIEW_TYPE,
+        current: (view: unknown) => view instanceof ContextPanelView && view.usesController(controller)
+      }
+    ];
+    for (const entry of entries) {
+      for (const leaf of this.app.workspace.getLeavesOfType(entry.type)) {
+        if (entry.current(leaf.view)) continue;
+        const state = leaf.getViewState();
+        await leaf.setViewState({ type: "empty", active: false });
+        await leaf.setViewState({ ...state, type: entry.type });
+      }
+    }
   }
 
   private requireController(): PluginWorkbenchController {
@@ -589,6 +708,7 @@ function entitySummary(entity: EntityRecord): EntitySummary {
     kind: entity.kind,
     name: entity.name,
     path: entity.path,
+    aliases: entity.aliases,
     status: entity.kind === "knowledge"
       ? fieldString(entity.fields, ["triage_status", "status"])
       : fieldString(entity.fields, ["status", "project_status", "relationship_status"]),
@@ -596,9 +716,13 @@ function entitySummary(entity: EntityRecord): EntitySummary {
     detail: fieldString(entity.fields, ["next_action", "main_requirement", "topic", "profile_summary"]),
     due: fieldString(entity.fields, ["due", "target_date", "followup_date", "meeting_date"]),
     phase: fieldString(entity.fields, ["phase", "project_phase"]),
+    projectType: fieldString(entity.fields, ["project_type"]),
+    client: fieldString(entity.fields, ["client", "customer", "organization"]),
+    project: fieldString(entity.fields, ["project", "projects"]),
     updatedAt: entity.mtime
   };
 }
+
 
 function fieldString(fields: Record<string, unknown>, keys: string[]): string | undefined {
   for (const key of keys) {

@@ -24,6 +24,10 @@ export class TaskBoardItemView extends ItemView {
     return "list-todo";
   }
 
+  usesController(controller: WorkbenchController): boolean {
+    return this.controller === controller;
+  }
+
   async onOpen(): Promise<void> {
     this.contentEl.empty();
     this.contentEl.addClass("quiet-workbench-task-board-host");

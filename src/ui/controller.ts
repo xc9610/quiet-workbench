@@ -5,6 +5,7 @@ import type {
   TransactionReceipt
 } from "../core/types";
 import type { QuietWorkbenchSettings } from "../settings";
+import type { QuickMemoEntry } from "../domain/memo";
 
 export interface DiagnosticItem {
   id: string;
@@ -17,12 +18,23 @@ export interface EntitySummary {
   kind: EntityKind;
   name: string;
   path: string;
+  aliases?: string[];
   status?: string;
   related?: string;
   detail?: string;
   due?: string;
   phase?: string;
+  projectType?: string;
+  client?: string;
+  project?: string;
   updatedAt?: number;
+}
+
+export interface QuickMemoSnapshot {
+  path: string;
+  exists: boolean;
+  recent: QuickMemoEntry[];
+  error?: string;
 }
 
 export interface ContextSnapshot {
@@ -45,6 +57,7 @@ export interface WorkbenchSnapshot {
   knowledge: EntitySummary[];
   tasks: TaskRecord[];
   transactionHistory: TransactionReceipt[];
+  memo: QuickMemoSnapshot;
   context: ContextSnapshot;
   lastReceipt?: TransactionReceipt;
 }
@@ -80,6 +93,8 @@ export interface WorkbenchController {
   migrateMeetingTask(task: TaskRecord, targetPath: string): Promise<TransactionReceipt | undefined>;
   migrateMeetingTasks(tasks: TaskRecord[], targetPath: string): Promise<TransactionReceipt[]>;
   updateKnowledge(path: string, status: string, projectPath?: string): Promise<TransactionReceipt>;
+  appendQuickMemo(text: string): Promise<TransactionReceipt>;
+  openYolo(path?: string): Promise<void>;
   saveLayout(sceneId: string, items: LayoutItem[]): Promise<void>;
   activateLayout(sceneId: string): Promise<void>;
   copyLayout(sceneId: string, name: string): Promise<string>;
@@ -99,6 +114,7 @@ export const EMPTY_SNAPSHOT: WorkbenchSnapshot = {
   knowledge: [],
   tasks: [],
   transactionHistory: [],
+  memo: { path: "", exists: false, recent: [] },
   context: {
     title: "未选择笔记",
     relatedProjects: [],

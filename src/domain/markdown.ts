@@ -157,6 +157,7 @@ export function parseTasks(
       blockId,
       sourceName: options.sourceName,
       revision,
+      migrated: /<!--\s*quiet-workbench:migrated\b[\s\S]*?-->/u.test(raw),
       raw,
       indent: match[1] ?? "",
       marker

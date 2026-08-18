@@ -24,6 +24,10 @@ export class ContextPanelView extends ItemView {
     return "panel-right";
   }
 
+  usesController(controller: WorkbenchController): boolean {
+    return this.controller === controller;
+  }
+
   async onOpen(): Promise<void> {
     this.contentEl.empty();
     this.contentEl.addClass("quiet-workbench-context-host");
@@ -39,4 +43,3 @@ export class ContextPanelView extends ItemView {
     this.contentEl.removeClass("quiet-workbench-context-host");
   }
 }
-
