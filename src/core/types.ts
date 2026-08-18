@@ -32,6 +32,8 @@ export interface TaskRecord {
   blockId?: string;
   sourceName: string;
   revision: string;
+  /** A meeting action that already has a durable Quiet Workbench migration receipt. */
+  migrated?: boolean;
 }
 
 export interface WidgetDefinition {
@@ -45,6 +47,12 @@ export interface WidgetDefinition {
 
 export interface LayoutItem {
   widgetId: string;
+  /** Stable identity for one widget instance. Legacy layouts may omit it. */
+  instanceId?: string;
+  /** User-facing title for this particular instance. */
+  title?: string;
+  /** Optional recommended configuration used to create this instance. */
+  presetId?: string;
   x: number;
   y: number;
   width: number;

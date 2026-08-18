@@ -24,6 +24,10 @@ export class WorkbenchItemView extends ItemView {
     return "layout-dashboard";
   }
 
+  usesController(controller: WorkbenchController): boolean {
+    return this.controller === controller;
+  }
+
   async onOpen(): Promise<void> {
     this.contentEl.empty();
     this.contentEl.addClass("quiet-workbench-host");
@@ -40,4 +44,3 @@ export class WorkbenchItemView extends ItemView {
     this.contentEl.removeClass("quiet-workbench-host");
   }
 }
-

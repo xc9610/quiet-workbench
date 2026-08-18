@@ -100,6 +100,9 @@ export class QuietWorkbenchSettingTab extends PluginSettingTab {
     this.addPathSetting(containerEl, "供应商目录", "supplierFolder");
     this.addPathSetting(containerEl, "知识目录", "knowledgeFolder");
 
+    new Setting(containerEl).setName("速记").setHeading();
+    this.addFilePathSetting(containerEl, "速记文件", "memoPath", "快速输入会追加到此 Markdown 文件；不会修改任何模板。");
+
     new Setting(containerEl).setName("模板").setHeading();
     this.addTemplateSetting(containerEl, "项目模板", "project");
     this.addTemplateSetting(containerEl, "客户模板", "client");
@@ -203,6 +206,18 @@ export class QuietWorkbenchSettingTab extends PluginSettingTab {
     new Setting(container)
       .setName(label)
       .setDesc("相对于 Vault 根目录；保存时会规范化路径。")
+      .addText((text) =>
+        text.setValue(this.host.settings[key]).onChange(async (value) => {
+          this.host.settings[key] = normalizePath(value.trim());
+          await this.host.saveSettings();
+        })
+      );
+  }
+
+  private addFilePathSetting(container: HTMLElement, label: string, key: "memoPath", description: string): void {
+    new Setting(container)
+      .setName(label)
+      .setDesc(description)
       .addText((text) =>
         text.setValue(this.host.settings[key]).onChange(async (value) => {
           this.host.settings[key] = normalizePath(value.trim());

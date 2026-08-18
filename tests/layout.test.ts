@@ -52,6 +52,33 @@ describe("default layouts", () => {
     expect(upgradePersistedLayouts(upgraded).find((layout) => layout.id === "sidebar-default")?.items).toEqual(upgradedSidebar.items);
   });
 
+  it("upgrades only the exact legacy default today layout and stays idempotent", () => {
+    const legacy = {
+      version: 1 as const,
+      id: "today",
+      name: "今日执行",
+      surface: "workbench" as const,
+      items: [
+        { widgetId: "tasks.today", x: 0, y: 0, width: 6, height: 5 },
+        { widgetId: "core.calendar", x: 6, y: 0, width: 3, height: 5 },
+        { widgetId: "core.quick-create", x: 9, y: 0, width: 3, height: 2 },
+        { widgetId: "projects.recent", x: 9, y: 2, width: 3, height: 3 }
+      ]
+    };
+    const upgraded = upgradePersistedLayouts([legacy])[0];
+    expect(upgraded.items.map((item) => item.widgetId)).toContain("capture.memo");
+    expect(upgraded.items.map((item) => item.widgetId)).not.toContain("core.calendar");
+    expect(upgradePersistedLayouts([upgraded])).toEqual([upgraded]);
+
+    const customized = structuredClone(legacy);
+    customized.items[0].width = 7;
+    const migratedCustom = upgradePersistedLayouts([customized])[0];
+    expect(migratedCustom.items[0]).toMatchObject({ widgetId: "view.list", presetId: "tasks.today-focus", width: 7 });
+    expect(migratedCustom.items[1]).toMatchObject({ widgetId: "view.calendar", presetId: "tasks.calendar", x: 6, width: 3 });
+    expect(migratedCustom.items.some((item) => item.widgetId === "capture.memo")).toBe(false);
+    expect(upgradePersistedLayouts([migratedCustom])).toEqual([migratedCustom]);
+  });
+
   it("does not rewrite custom sidebars or re-add an explicitly removed upcoming widget", () => {
     const custom: ReturnType<typeof getDefaultLayouts>[number] = {
       version: 1,
@@ -71,7 +98,7 @@ describe("default layouts", () => {
 describe("layout validation and management", () => {
   const registry = createBuiltinWidgetRegistry();
 
-  it("rejects invalid JSON, unknown widgets, duplicates and wrong surfaces", () => {
+  it("rejects invalid JSON, duplicate instance IDs, unknown widgets and wrong surfaces", () => {
     expect(importLayout("{", registry).valid).toBe(false);
     const invalid = {
       version: 1,
@@ -89,10 +116,31 @@ describe("layout validation and management", () => {
     if (!result.valid) {
       expect(result.issues.map((issue) => issue.message)).toEqual(expect.arrayContaining([
         "Widget does not support sidebar",
-        "A widget may appear only once per layout",
+        "Widget instance IDs must be unique within a layout",
         "Unknown widget: missing.widget"
       ]));
     }
+  });
+
+  it("allows multiple independently configured instances of the same widget", () => {
+    const result = validateLayout({
+      version: 1,
+      id: "instances",
+      name: "Instances",
+      surface: "workbench",
+      items: [
+        { widgetId: "view.list", instanceId: "list-client", x: 0, y: 0, width: 6, height: 4, config: { source: { kind: "tasks", scopeMode: "all", clientPath: "clients/a.md" }, query: { limit: 30 } } },
+        { widgetId: "view.list", instanceId: "list-internal", x: 6, y: 0, width: 6, height: 4, config: { source: { kind: "tasks", scopeMode: "all", projectType: "内部研发" }, query: { limit: 30 } } }
+      ]
+    }, registry);
+    expect(result.valid).toBe(true);
+  });
+
+  it("registers reusable view and control component types", () => {
+    for (const id of [
+      "view.list", "view.board", "view.calendar", "view.quadrant", "view.timeline",
+      "view.metrics", "view.detail", "view.relations", "control.selector", "control.actions", "capture.memo"
+    ]) expect(registry.has(id)).toBe(true);
   });
 
   it("rejects invalid visibility flags and grid overflow", () => {
@@ -135,6 +183,28 @@ describe("layout validation and management", () => {
     if (!result.valid) expect(result.issues[0].path).toBe("items[0].config.limit");
   });
 
+  it("validates persisted today-focus filter config", () => {
+    const result = validateLayout({
+      version: 1,
+      id: "focus-config",
+      name: "Focus",
+      surface: "workbench",
+      items: [{
+        widgetId: "tasks.today",
+        x: 0,
+        y: 0,
+        width: 8,
+        height: 6,
+        config: { quick: "tomorrow", scopes: ["project", "unknown"] }
+      }]
+    }, registry);
+    expect(result.valid).toBe(false);
+    if (!result.valid) expect(result.issues.map((issue) => issue.path)).toEqual(expect.arrayContaining([
+      "items[0].config.quick",
+      "items[0].config.scopes"
+    ]));
+  });
+
   it("copies, renames, imports and restores layouts", () => {
     const manager = new LayoutManager(registry);
     const copy = manager.copy("today", "my-today", "我的今日");
@@ -160,7 +230,7 @@ describe("layout validation and management", () => {
     layout.items[1].hidden = true;
     const mobile = adaptLayoutForDevice(layout, "mobile");
     expect(mobile.items.every((item) => item.x === 0 && item.width === 1)).toBe(true);
-    expect(mobile.items.map((item) => item.y)).toEqual([0, 1, 6, 8]);
+    expect(mobile.items.map((item) => item.y)).toEqual([0, 1, 4, 6]);
     expect(mobile.items[0].collapsed).toBe(true);
     expect(mobile.items[1].hidden).toBe(true);
     expect(adaptLayoutForDevice(layout, "desktop")).toEqual(layout);
@@ -168,7 +238,8 @@ describe("layout validation and management", () => {
 
   it("supports drag/resize, hide/collapse and explicit mobile ordering", () => {
     const layout = getDefaultLayouts().find((item) => item.id === "today")!;
-    const edited = updateLayoutItem(layout, "tasks.today", {
+    const focusKey = layout.items[0].instanceId!;
+    const edited = updateLayoutItem(layout, focusKey, {
       x: 2,
       y: 7,
       width: 8,
@@ -176,7 +247,7 @@ describe("layout validation and management", () => {
       hidden: true,
       collapsed: true
     });
-    expect(edited.items.find((item) => item.widgetId === "tasks.today")).toMatchObject({
+    expect(edited.items.find((item) => item.instanceId === focusKey)).toMatchObject({
       x: 2,
       y: 7,
       width: 8,
@@ -186,13 +257,14 @@ describe("layout validation and management", () => {
     });
     expect(layout.items[0].x).toBe(0);
 
-    const order = layout.items.map((item) => item.widgetId).reverse();
+    const order = layout.items.map((item) => item.instanceId ?? item.widgetId).reverse();
     const mobile = reorderMobileLayout(layout, order);
-    expect(mobile.items.map((item) => item.widgetId)).toEqual(order);
+    expect(mobile.items.map((item) => item.instanceId ?? item.widgetId)).toEqual(order);
     expect(mobile.items.every((item) => item.x === 0 && item.width === 1)).toBe(true);
     expect(() => reorderMobileLayout(layout, order.slice(1))).toThrow(/every layout widget/);
 
     const manager = new LayoutManager(registry);
-    expect(manager.updateItem("today", "tasks.today", { hidden: true }).items[0].hidden).toBe(true);
+    const managerFocusKey = manager.get("today")!.items[0].instanceId!;
+    expect(manager.updateItem("today", managerFocusKey, { hidden: true }).items[0].hidden).toBe(true);
   });
 });

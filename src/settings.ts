@@ -7,6 +7,7 @@ export interface QuietWorkbenchSettings {
   meetingFolder: string;
   supplierFolder: string;
   knowledgeFolder: string;
+  memoPath: string;
   templates: Record<"project" | "client" | "meeting" | "supplier", string>;
   clientAliases: Record<string, string[]>;
   enabledPacks: Record<string, boolean>;
@@ -23,6 +24,7 @@ export const DEFAULT_SETTINGS: QuietWorkbenchSettings = {
   meetingFolder: "10_业务_Business/03_会议_Meetings",
   supplierFolder: "10_业务_Business/08_供应商_Suppliers",
   knowledgeFolder: "20_技术_Technology",
+  memoPath: "40_管理_Management/01_工作_Work/Workbench速记.md",
   templates: {
     project: "40_管理_Management/03_模板_Templates/TP 项目记录 v3.md",
     client: "40_管理_Management/03_模板_Templates/TP 客户记录 v2.md",
