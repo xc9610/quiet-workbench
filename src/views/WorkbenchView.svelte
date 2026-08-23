@@ -10,6 +10,8 @@
   } from "../ui/controller";
   import { EMPTY_SNAPSHOT } from "../ui/controller";
   import { formatDate } from "../services/template-service";
+  import type { MeetingMigrationBatchResult } from "../services/meeting-migration-service";
+  import type { KnowledgePublicationPreview } from "../services/knowledge-publishing-service";
   import { layoutItemKey } from "../core/layout";
   import { BUILTIN_WIDGETS } from "../core/widget-registry";
   import {
@@ -31,6 +33,7 @@
   } from "../domain/focus";
   import {
     calculateProjectHealth,
+    clientFollowupBucket,
     dateAfter,
     effectiveTaskDate,
     isRecurringTask,
@@ -44,9 +47,9 @@
   export let controller: WorkbenchController;
 
   type SceneId = string;
-  type DialogKind = "entity" | "task" | "task-edit" | "migrate" | "knowledge" | null;
+  type DialogKind = "entity" | "task" | "task-edit" | "migrate" | "knowledge" | "yolo-preview" | null;
   type MoveMode = "move" | "resize";
-  const UI_VERSION = "0.5.9";
+  const UI_VERSION = "0.6.0";
 
   interface SceneDefinition {
     id: SceneId;
@@ -130,9 +133,14 @@
   let taskEditReason = "";
   let migrationTarget = "";
   let migrationTasks: TaskRecord[] = [];
+  let migrationBatch: MeetingMigrationBatchResult | undefined;
   let selectedKnowledgePath = "";
   let knowledgeStatus = "待处理";
   let knowledgeProject = "";
+  let knowledgePublishTitle = "";
+  let knowledgePublication: KnowledgePublicationPreview | undefined;
+  let yoloPrompt = "";
+  let yoloPath = "";
   let entityStack: EntityDraft[] = [];
   let layoutUndo: LayoutItem[][] = [];
   let focusFilterStates: Record<string, FocusFilters> = {};
@@ -153,6 +161,9 @@
   let editingConfig: Record<string, unknown> = {};
   let editingTitle = "";
   let sharedProjectPath = "";
+  let sharedClientPath = "";
+  let sharedMeetingPath = "";
+  let sharedSupplierPath = "";
   let widgetSearch: Record<string, string> = {};
   let isDesktop = !Platform.isMobile;
   let gridEl: HTMLDivElement;
@@ -426,8 +437,9 @@
       "请协助我处理以下 Quiet Workbench 今日焦点。先分析和给出编号建议，不要直接修改文件：",
       ...rows.map((task, index) => `${index + 1}. [${scopeLabel(task.scope)}] ${task.text}（${focusDate(task)}，来源：${task.sourceName}）`)
     ].join("\n");
-    await navigator.clipboard.writeText(prompt);
-    await controller.openYolo();
+    yoloPrompt = prompt;
+    yoloPath = "";
+    dialog = "yolo-preview";
   }
 
   async function submitQuickMemo(): Promise<void> {
@@ -456,8 +468,15 @@
       "3. 知识素材或暂时保留的记录。",
       "等待我确认后再执行任何写入。"
     ].join("\n");
-    await navigator.clipboard.writeText(prompt);
-    await controller.openYolo(snapshot.memo.path);
+    yoloPrompt = prompt;
+    yoloPath = snapshot.memo.path;
+    dialog = "yolo-preview";
+  }
+
+  async function confirmYolo(): Promise<void> {
+    await navigator.clipboard.writeText(yoloPrompt);
+    await controller.openYolo(yoloPath || undefined);
+    dialog = null;
   }
 
   function workbenchLayouts() {
@@ -578,7 +597,7 @@
   }
 
   function configString(item: LayoutItem, key: string): string {
-    const section = ["scopeMode", "projectPath", "clientPath", "projectType", "taskScopes"].includes(key) ? "source" : "query";
+    const section = ["scopeMode", "projectPath", "clientPath", "meetingPath", "supplierPath", "projectType", "taskScopes"].includes(key) ? "source" : "query";
     const nested = item.config?.[section];
     const value = nested && typeof nested === "object" && !Array.isArray(nested)
       ? (nested as Record<string, unknown>)[key]
@@ -621,6 +640,7 @@
     if (typeof value === "string") return value as WidgetDataSource;
     if (item.widgetId.startsWith("projects.")) return "projects";
     if (item.widgetId.startsWith("meetings.")) return "meetings";
+    if (item.widgetId.startsWith("suppliers.")) return "suppliers";
     return "tasks";
   }
 
@@ -646,8 +666,92 @@
     const mode = scopeMode(item);
     if (mode === "fixed") return configString(item, "projectPath");
     if (mode === "context") return contextProjectPath();
-    if (mode === "shared") return sharedProjectPath || contextProjectPath() || snapshot.projects[0]?.path || "";
+    if (mode === "shared") return sharedProjectPath || contextProjectPath();
     return "";
+  }
+
+  function contextClientPath(): string {
+    return snapshot.context.kind === "client" && snapshot.context.path ? snapshot.context.path : "";
+  }
+
+  function scopedClientPath(item: LayoutItem): string {
+    const mode = scopeMode(item);
+    if (mode === "fixed") return configString(item, "clientPath");
+    if (mode === "context") return contextClientPath();
+    if (mode === "shared") return sharedClientPath || contextClientPath();
+    return configString(item, "clientPath");
+  }
+
+  function scopedClients(item: LayoutItem) {
+    const clientPath = scopedClientPath(item);
+    const relationshipStatus = configString(item, "relationshipStatus");
+    const organizationType = configString(item, "organizationType");
+    const query = (widgetSearch[itemKey(item)] ?? configString(item, "search")).trim().toLocaleLowerCase("zh-CN");
+    return snapshot.clients
+      .filter((client) => !clientPath || client.path === clientPath)
+      .filter((client) => !relationshipStatus || client.relationshipStatus === relationshipStatus)
+      .filter((client) => !organizationType || client.organizationType === organizationType)
+      .filter((client) => !query || [client.name, client.path, ...(client.aliases ?? []), client.organizationType, client.businessDomains, client.relationshipStatus].some((value) => value?.toLocaleLowerCase("zh-CN").includes(query)))
+      .slice(0, configLimit(item));
+  }
+
+  function selectedClient(item: LayoutItem) {
+    const path = scopedClientPath(item);
+    if (scopeMode(item) !== "all" && !path) return undefined;
+    return snapshot.clients.find((client) => client.path === path) ?? scopedClients(item)[0];
+  }
+
+  function sharedClient() {
+    return snapshot.clients.find((client) => client.path === sharedClientPath);
+  }
+
+  function contextMeetingPath(): string {
+    return snapshot.context.kind === "meeting" && snapshot.context.path ? snapshot.context.path : "";
+  }
+
+  function scopedMeetingPath(item: LayoutItem): string {
+    const mode = scopeMode(item);
+    if (mode === "fixed") return configString(item, "meetingPath");
+    if (mode === "context") return contextMeetingPath();
+    if (mode === "shared") return sharedMeetingPath || contextMeetingPath();
+    return configString(item, "meetingPath");
+  }
+
+  function scopedMeetings(item: LayoutItem) {
+    const path = scopedMeetingPath(item);
+    const query = (widgetSearch[itemKey(item)] ?? configString(item, "search")).trim().toLocaleLowerCase("zh-CN");
+    return snapshot.meetings
+      .filter((meeting) => !path || meeting.path === path)
+      .filter((meeting) => !query || [meeting.name, meeting.path, meeting.project, meeting.client, meeting.status].some((value) => value?.toLocaleLowerCase("zh-CN").includes(query)))
+      .sort((left, right) => (right.due ?? "").localeCompare(left.due ?? ""))
+      .slice(0, configLimit(item));
+  }
+
+  function selectedMeeting(item: LayoutItem) {
+    const path = scopedMeetingPath(item);
+    return snapshot.meetings.find((meeting) => meeting.path === path) ?? scopedMeetings(item)[0];
+  }
+
+  function scopedSupplierPath(item: LayoutItem): string {
+    const mode = scopeMode(item);
+    if (mode === "fixed") return configString(item, "supplierPath");
+    if (mode === "context" && snapshot.context.kind === "supplier") return snapshot.context.path ?? "";
+    if (mode === "shared") return sharedSupplierPath || (snapshot.context.kind === "supplier" ? snapshot.context.path ?? "" : "");
+    return configString(item, "supplierPath");
+  }
+
+  function scopedSuppliers(item: LayoutItem) {
+    const path = scopedSupplierPath(item);
+    const query = (widgetSearch[itemKey(item)] ?? configString(item, "search")).trim().toLocaleLowerCase("zh-CN");
+    return snapshot.suppliers
+      .filter((supplier) => !path || supplier.path === path)
+      .filter((supplier) => !query || [supplier.name, supplier.path, supplier.status, supplier.related, supplier.detail].some((value) => value?.toLocaleLowerCase("zh-CN").includes(query)))
+      .slice(0, configLimit(item));
+  }
+
+  function selectedSupplier(item: LayoutItem) {
+    const path = scopedSupplierPath(item);
+    return snapshot.suppliers.find((supplier) => supplier.path === path) ?? scopedSuppliers(item)[0];
   }
 
   function projectForTask(task: TaskRecord) {
@@ -657,8 +761,9 @@
   }
 
   function scopedProjects(item: LayoutItem) {
-    const fixedPath = scopedProjectPath(item);
-    const clientPath = configString(item, "clientPath");
+    const clientMode = queryMode(item) === "client-projects";
+    const fixedPath = clientMode ? "" : scopedProjectPath(item);
+    const clientPath = clientMode ? scopedClientPath(item) : configString(item, "clientPath");
     const projectType = configString(item, "projectType");
     const status = configString(item, "status");
     const query = (widgetSearch[itemKey(item)] ?? configString(item, "search")).trim().toLocaleLowerCase("zh-CN");
@@ -672,8 +777,9 @@
   }
 
   function scopedTasks(item: LayoutItem): TaskRecord[] {
-    const projectPath = scopedProjectPath(item);
-    const clientPath = configString(item, "clientPath");
+    const clientMode = queryMode(item) === "client-actions";
+    const projectPath = clientMode ? "" : scopedProjectPath(item);
+    const clientPath = clientMode ? scopedClientPath(item) : configString(item, "clientPath");
     const projectType = configString(item, "projectType");
     const sourceTaskScopes = configSection(item.config ?? {}, "source").taskScopes;
     const taskScopes = Array.isArray(sourceTaskScopes) ? sourceTaskScopes.map(String) : Array.isArray(item.config?.taskScopes) ? item.config.taskScopes.map(String) : [];
@@ -693,6 +799,23 @@
     return scopedProjects(item)[0] ?? snapshot.projects.find((project) => project.path === scopedProjectPath(item));
   }
 
+  function sharedProject() {
+    return snapshot.projects.find((project) => project.path === sharedProjectPath);
+  }
+
+  function projectClient(project: WorkbenchSnapshot["projects"][number]) {
+    const path = resolveEntityPath(project.client, snapshot.clients);
+    return path ? snapshot.clients.find((client) => client.path === path) : undefined;
+  }
+
+  function projectClientLabel(project: WorkbenchSnapshot["projects"][number]): string {
+    return projectClient(project)?.name ?? project.client?.replace(/^\[\[|\]\]$/gu, "").split("|").at(-1) ?? "未关联客户";
+  }
+
+  function projectUpdatedLabel(project: WorkbenchSnapshot["projects"][number]): string {
+    return project.updatedAt ? new Date(project.updatedAt).toLocaleDateString("zh-CN") : "未知";
+  }
+
   function tasksForProject(path: string, includeCompleted = true): TaskRecord[] {
     return snapshot.tasks.filter((task) => projectForTask(task)?.path === path && (includeCompleted || !task.completed));
   }
@@ -703,6 +826,56 @@
 
   function meetingsForProject(path: string) {
     return snapshot.meetings.filter((meeting) => resolveProject(meeting.project)?.path === path);
+  }
+
+  function projectsForClient(path: string) {
+    return snapshot.projects.filter((project) => resolveEntityPath(project.client, snapshot.clients) === path);
+  }
+
+  function tasksForClient(path: string): TaskRecord[] {
+    const projectPaths = new Set(projectsForClient(path).map((project) => project.path));
+    return snapshot.tasks.filter((task) => !task.completed && !task.migrated && (task.path === path || Boolean(projectForTask(task) && projectPaths.has(projectForTask(task)!.path))));
+  }
+
+  function meetingsForClient(path: string) {
+    const projectPaths = new Set(projectsForClient(path).map((project) => project.path));
+    return snapshot.meetings.filter((meeting) => resolveEntityPath(meeting.client, snapshot.clients) === path || Boolean(resolveProject(meeting.project) && projectPaths.has(resolveProject(meeting.project)!.path)));
+  }
+
+  function clientRowsForWidget(item: LayoutItem) {
+    let rows = [...scopedClients(item)];
+    if (queryMode(item) === "followups") {
+      const { today, end } = dayRange(7);
+      rows = rows
+        .filter((client) => client.followupDate && client.followupDate <= end)
+        .sort((left, right) => (left.followupDate ?? "").localeCompare(right.followupDate ?? ""));
+    }
+    return rows;
+  }
+
+  function clientStatusGroups(item: LayoutItem): Array<[string, WorkbenchSnapshot["clients"]]> {
+    const groups = new Map<string, WorkbenchSnapshot["clients"]>();
+    for (const client of scopedClients(item)) {
+      const status = client.relationshipStatus || "未设置";
+      groups.set(status, [...(groups.get(status) ?? []), client]);
+    }
+    return [...groups.entries()];
+  }
+
+  function clientFollowupLabel(client: WorkbenchSnapshot["clients"][number]): string {
+    if (!client.followupDate) return "未安排跟进";
+    const { today, end } = dayRange(7);
+    const bucket = clientFollowupBucket(client.followupDate, today, end);
+    const prefix = { overdue: "已逾期", today: "今天", week: "7 天内", later: "以后", unscheduled: "未安排" }[bucket];
+    return `${prefix} · ${client.followupDate}`;
+  }
+
+  function clientRelationshipStatuses(): string[] {
+    return [...new Set(snapshot.clients.map((client) => client.relationshipStatus).filter((value): value is string => Boolean(value)))].sort((left, right) => left.localeCompare(right, "zh-CN"));
+  }
+
+  function clientOrganizationTypes(): string[] {
+    return [...new Set(snapshot.clients.map((client) => client.organizationType).filter((value): value is string => Boolean(value)))].sort((left, right) => left.localeCompare(right, "zh-CN"));
   }
 
   function dayRange(days: number): { today: string; end: string } {
@@ -832,7 +1005,7 @@
 
   function dialogTitle(kind: DialogKind): string {
     if (!kind) return "工作流";
-    return { entity: "新建条目", task: "添加项目任务", "task-edit": "调整任务", migrate: "迁移会议行动项", knowledge: "处理知识" }[kind];
+    return { entity: "新建条目", task: "添加项目任务", "task-edit": "调整任务", migrate: "迁移会议行动项", knowledge: "处理知识", "yolo-preview": "YOLO 处理预览" }[kind];
   }
 
   function entityTargetFolder(): string {
@@ -854,8 +1027,8 @@
     await controller.activateLayout(sceneId);
   }
 
-  function enabled(widgetId: string): boolean {
-    const prefix = widgetId.split(".")[0];
+  function enabled(item: LayoutItem): boolean {
+    const prefix = (item.presetId || item.widgetId).split(".")[0];
     const packByPrefix: Record<string, string> = {
       projects: "projects",
       clients: "clients",
@@ -954,11 +1127,11 @@
     }
   }
 
-  function openCreate(kind: Exclude<EntityKind, "knowledge">, contextPath = ""): void {
+  function openCreate(kind: Exclude<EntityKind, "knowledge">, contextPath = "", contextKind: "project" | "client" = "project"): void {
     entityKind = kind;
     entityName = "";
-    relatedClient = "";
-    relatedProject = kind === "meeting" ? contextPath : "";
+    relatedClient = contextKind === "client" && (kind === "project" || kind === "meeting") ? contextPath : "";
+    relatedProject = contextKind === "project" && kind === "meeting" ? contextPath : "";
     entityTemplatePreview = "";
     entityStack = [];
     dialog = "entity";
@@ -1012,6 +1185,7 @@
     selectedTask = task;
     migrationTasks = task ? [task] : tasksByScope("meeting-draft");
     migrationTarget = snapshot.projects[0]?.path ?? snapshot.clients[0]?.path ?? "";
+    migrationBatch = undefined;
     dialog = "migrate";
   }
 
@@ -1019,6 +1193,8 @@
     selectedKnowledgePath = path;
     knowledgeStatus = status || "待处理";
     knowledgeProject = "";
+    knowledgePublishTitle = snapshot.knowledge.find((entry) => entry.path === path)?.name ?? "";
+    knowledgePublication = undefined;
     dialog = "knowledge";
   }
 
@@ -1128,18 +1304,62 @@
   async function submitMigration(): Promise<void> {
     if (!migrationTasks.length || !migrationTarget) return;
     const targetName = [...snapshot.projects, ...snapshot.clients].find((entry) => entry.path === migrationTarget)?.name ?? migrationTarget;
-    const succeeded = await run(
-      () => migrationTasks.length === 1
-        ? controller.migrateMeetingTask(migrationTasks[0], migrationTarget)
-        : controller.migrateMeetingTasks(migrationTasks, migrationTarget),
-      `已迁移 ${migrationTasks.length} 条会议行动项到「${targetName}」，可在任务看板查看`
-    );
-    if (succeeded) dialog = null;
+    busy = true;
+    message = "";
+    try {
+      migrationBatch = await controller.migrateMeetingTasks(migrationTasks, migrationTarget);
+      message = migrationBatch.status === "completed"
+        ? `已迁移到「${targetName}」：${migrationBatch.migratedCount} 条，重复跳过 ${migrationBatch.alreadyMigratedCount} 条`
+        : `批次${migrationBatch.status === "partial" ? "部分完成" : "失败"}；请查看逐条回执并继续恢复。`;
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function retryMigration(): Promise<void> {
+    if (!migrationBatch?.retryItems.length) return;
+    busy = true;
+    try {
+      migrationBatch = await controller.retryMeetingMigration(migrationBatch);
+      message = migrationBatch.status === "completed" ? "失败项已全部恢复。" : "仍有未完成项，请根据回执检查源文件。";
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    } finally {
+      busy = false;
+    }
   }
 
   async function submitKnowledge(): Promise<void> {
     if (!selectedKnowledgePath) return;
     const succeeded = await run(() => controller.updateKnowledge(selectedKnowledgePath, knowledgeStatus, knowledgeProject || undefined), "知识状态已更新");
+    if (succeeded) dialog = null;
+  }
+
+  async function previewKnowledgePublication(): Promise<void> {
+    if (!selectedKnowledgePath || !knowledgePublishTitle.trim()) return;
+    busy = true;
+    try {
+      knowledgePublication = await controller.previewKnowledgePublication({
+        sourcePath: selectedKnowledgePath,
+        title: knowledgePublishTitle.trim(),
+        targetFolder: controller.settings.formalKnowledgeFolder,
+        templatePath: controller.settings.knowledgeTemplate || undefined,
+        projectPath: knowledgeProject || undefined,
+        sourceStatus: "已归档"
+      });
+      message = "已生成只读发布预览；尚未写入任何文件。";
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function publishKnowledge(): Promise<void> {
+    if (!knowledgePublication) return;
+    const succeeded = await run(() => controller.publishKnowledge(knowledgePublication!), "正式知识笔记已创建，来源已标记归档；模板未被修改。");
     if (succeeded) dialog = null;
   }
 
@@ -1249,7 +1469,7 @@
 
   {#key activeScene}
     <div class="qwb-grid" bind:this={gridEl}>
-    {#each items.filter((item) => !item.hidden && enabled(item.widgetId)) as item (itemKey(item))}
+    {#each items.filter((item) => !item.hidden && enabled(item)) as item (itemKey(item))}
       <section class:collapsed={item.collapsed} class:editing={layoutEditMode} class="qwb-widget" style={itemStyle(item)}>
         <header class="qwb-widget-header">
           {#if layoutEditMode}
@@ -1346,7 +1566,7 @@
                   <div class="qwb-task-row"><input type="checkbox" checked={task.completed} disabled={!controller.settings.writesEnabled || busy || task.scope === "meeting-draft"} on:change={(event) => run(() => controller.updateTask(task, { completed: (event.currentTarget as HTMLInputElement).checked }), "任务状态已更新")} /><button class="qwb-link" on:click={() => controller.openPath(task.path)}>{task.text}<small>{scopeLabel(task.scope)} · {task.sourceName}</small></button><time>{effectiveTaskDate(task) ?? "未安排"}</time>{#if task.scope === "meeting-draft"}<button class="qwb-row-action" disabled={!controller.settings.writesEnabled} on:click={() => openMigration(task)}>迁移</button>{:else}<button class="qwb-row-action" on:click={() => openTaskEdit(task)}>编辑</button>{/if}</div>
                 {:else}<p class="qwb-empty">当前组件范围内没有任务。</p>{/each}
               </div>
-              <button class="qwb-text-action" on:click={() => openTask(scopedProjectPath(item))}>＋ 添加项目任务</button>
+              {#if queryMode(item) !== "client-actions"}<button class="qwb-text-action" on:click={() => openTask(scopedProjectPath(item))}>＋ 添加项目任务</button>{/if}
             {:else if item.widgetId === "tasks.board" || item.widgetId === "projects.tasks-board" || (item.widgetId === "view.board" && dataSource(item) === "tasks")}
               <div class="qwb-board">
                 {#each [["overdue", "逾期"], ["today", "今天"], ["week", "本周"], ["later", "以后"], ["unscheduled", "未安排"]] as column}
@@ -1369,8 +1589,21 @@
             {:else if item.widgetId === "tasks.calendar" || (item.widgetId === "view.calendar" && dataSource(item) === "tasks")}
               <div class="qwb-date-groups">
                 {#each groupTasksByDate(item) as group}
-                  <section><header><strong>{group[0]}</strong><span>{group[1].length}</span></header>{#each group[1] as task (task.id)}<button on:click={() => controller.openPath(task.path)}><span>{task.text}</span><small>{task.sourceName}</small></button>{/each}</section>
+                  <section>
+                    <header><strong>{group[0]}</strong><span>{group[1].length}</span></header>
+                    <div class="qwb-date-column-body">
+                      {#each group[1] as task (task.id)}
+                        <button on:click={() => controller.openPath(task.path)}><span>{task.text}</span><small>{task.sourceName}</small></button>
+                      {/each}
+                    </div>
+                  </section>
                 {:else}<p class="qwb-empty">没有可显示的任务日期。</p>{/each}
+              </div>
+            {:else if item.widgetId === "view.calendar" && dataSource(item) === "meetings"}
+              <div class="qwb-date-groups">
+                {#each [...new Map(scopedMeetings(item).filter((meeting) => meeting.due).map((meeting) => [meeting.due!, scopedMeetings(item).filter((entry) => entry.due === meeting.due)])).entries()].sort((left, right) => left[0].localeCompare(right[0])) as group}
+                  <section><header><strong>{group[0]}</strong><span>{group[1].length}</span></header><div class="qwb-date-column-body">{#each group[1] as meeting}<button on:click={() => controller.openPath(meeting.path)}><span>{meeting.name}</span><small>{meeting.project || meeting.client || "会议记录"}</small></button>{/each}</div></section>
+                {:else}<p class="qwb-empty">没有带日期的会议记录。</p>{/each}
               </div>
             {:else if item.widgetId === "tasks.quadrant" || (item.widgetId === "view.quadrant" && dataSource(item) === "tasks")}
               <div class="qwb-quadrants">
@@ -1424,11 +1657,32 @@
                 {/each}
               </div>
             {:else if item.widgetId === "projects.search" || item.widgetId === "control.selector"}
-              <div class="qwb-widget-search"><input value={widgetSearch[itemKey(item)] ?? ""} placeholder="搜索项目名称、客户或类型" on:input={(event) => (widgetSearch = { ...widgetSearch, [itemKey(item)]: (event.currentTarget as HTMLInputElement).value })} /><span>{scopedProjects(item).length}</span></div>
-              <div class="qwb-project-search-results">{#each scopedProjects(item).slice(0, 8) as project}<div class:active={sharedProjectPath === project.path}><button on:click={() => (sharedProjectPath = project.path)}><strong>{project.name}</strong><small>{project.client || project.projectType || project.status || "开放项目"}</small></button><button on:click={() => controller.openPath(project.path)}>打开</button></div>{:else}<p class="qwb-empty">没有匹配项目。</p>{/each}</div>
+              {#if dataSource(item) === "clients"}
+                {#if sharedClient()}<div class="qwb-shared-project"><span><small>当前共享客户</small><strong>{sharedClient()!.name}</strong></span><button on:click={() => controller.openPath(sharedClient()!.path)}>打开</button><button on:click={() => (sharedClientPath = "")}>清除</button></div>{/if}
+                <div class="qwb-widget-search"><input value={widgetSearch[itemKey(item)] ?? ""} placeholder="搜索客户名称、别名或业务领域" on:input={(event) => (widgetSearch = { ...widgetSearch, [itemKey(item)]: (event.currentTarget as HTMLInputElement).value })} /><span>{scopedClients(item).length}</span></div>
+                <div class="qwb-project-search-results">{#each scopedClients(item).slice(0, 8) as client}<div class:active={sharedClientPath === client.path}><button class="qwb-project-choice" on:click={() => (sharedClientPath = client.path)}><strong>{client.name}</strong><span><small>{client.organizationType || "未分类"}</small><small>{client.relationshipStatus || "未设置关系"}</small><small>{client.followupDate || "未安排跟进"}</small></span></button><div class="qwb-project-choice-actions"><button class:active={sharedClientPath === client.path} on:click={() => (sharedClientPath = client.path)}>{sharedClientPath === client.path ? "已选择" : "选择"}</button><button on:click={() => controller.openPath(client.path)}>打开</button></div></div>{:else}<p class="qwb-empty">没有匹配客户。</p>{/each}</div>
+              {:else if dataSource(item) === "meetings"}
+                <div class="qwb-widget-search"><input value={widgetSearch[itemKey(item)] ?? ""} placeholder="搜索会议名称、项目或客户" on:input={(event) => (widgetSearch = { ...widgetSearch, [itemKey(item)]: (event.currentTarget as HTMLInputElement).value })} /><span>{scopedMeetings(item).length}</span></div>
+                <div class="qwb-project-search-results">{#each scopedMeetings(item).slice(0, 8) as meeting}<div class:active={sharedMeetingPath === meeting.path}><button class="qwb-project-choice" on:click={() => (sharedMeetingPath = meeting.path)}><strong>{meeting.name}</strong><span><small>{meeting.due || "未设置日期"}</small><small>{meeting.project || meeting.client || "未关联"}</small></span></button><div class="qwb-project-choice-actions"><button class:active={sharedMeetingPath === meeting.path} on:click={() => (sharedMeetingPath = meeting.path)}>{sharedMeetingPath === meeting.path ? "已选择" : "选择"}</button><button on:click={() => controller.openPath(meeting.path)}>打开</button></div></div>{:else}<p class="qwb-empty">没有匹配会议。</p>{/each}</div>
+              {:else if dataSource(item) === "suppliers"}
+                <div class="qwb-widget-search"><input value={widgetSearch[itemKey(item)] ?? ""} placeholder="搜索供应商名称或状态" on:input={(event) => (widgetSearch = { ...widgetSearch, [itemKey(item)]: (event.currentTarget as HTMLInputElement).value })} /><span>{scopedSuppliers(item).length}</span></div>
+                <div class="qwb-project-search-results">{#each scopedSuppliers(item).slice(0, 8) as supplier}<div class:active={sharedSupplierPath === supplier.path}><button class="qwb-project-choice" on:click={() => (sharedSupplierPath = supplier.path)}><strong>{supplier.name}</strong><span><small>{supplier.status || "未设置状态"}</small><small>{supplier.detail || supplier.related || "供应商"}</small></span></button><div class="qwb-project-choice-actions"><button class:active={sharedSupplierPath === supplier.path} on:click={() => (sharedSupplierPath = supplier.path)}>{sharedSupplierPath === supplier.path ? "已选择" : "选择"}</button><button on:click={() => controller.openPath(supplier.path)}>打开</button></div></div>{:else}<p class="qwb-empty">没有匹配供应商。</p>{/each}</div>
+              {:else}
+                {#if sharedProject()}<div class="qwb-shared-project"><span><small>当前共享项目</small><strong>{sharedProject()!.name}</strong></span><button on:click={() => controller.openPath(sharedProject()!.path)}>打开</button><button on:click={() => (sharedProjectPath = "")}>清除</button></div>{/if}
+                <div class="qwb-widget-search"><input value={widgetSearch[itemKey(item)] ?? ""} placeholder="搜索项目名称、客户或类型" on:input={(event) => (widgetSearch = { ...widgetSearch, [itemKey(item)]: (event.currentTarget as HTMLInputElement).value })} /><span>{scopedProjects(item).length}</span></div>
+                <div class="qwb-project-search-results">{#each scopedProjects(item).slice(0, 8) as project}<div class:active={sharedProjectPath === project.path}><button class="qwb-project-choice" on:click={() => (sharedProjectPath = project.path)}><strong>{project.name}</strong><span><small>{projectClientLabel(project)}</small><small>{project.projectType || "未分类"}</small><small>{project.status || project.phase || "开放"}</small></span></button><div class="qwb-project-choice-actions"><button class:active={sharedProjectPath === project.path} on:click={() => (sharedProjectPath = project.path)}>{sharedProjectPath === project.path ? "已选择" : "选择"}</button><button on:click={() => controller.openPath(project.path)}>打开</button></div></div>{:else}<p class="qwb-empty">没有匹配项目。</p>{/each}</div>
+              {/if}
             {:else if item.widgetId === "projects.list" || (item.widgetId === "view.list" && dataSource(item) === "projects" && !["risks", "milestones"].includes(queryMode(item)))}
               <div class="qwb-widget-search"><input value={widgetSearch[itemKey(item)] ?? ""} placeholder="搜索项目" on:input={(event) => (widgetSearch = { ...widgetSearch, [itemKey(item)]: (event.currentTarget as HTMLInputElement).value })} /><span>{scopedProjects(item).length}</span></div>
               <div class="qwb-project-table">{#each projectRowsForWidget(item) as project}<button on:click={() => controller.openPath(project.path)}><span><strong>{project.name}</strong><small>{project.client || "未关联客户"}</small></span><em>{project.projectType || "未分类"}</em><em>{project.status || project.phase || "开放"}</em><time>{project.due || ""}</time></button>{:else}<p class="qwb-empty">没有匹配项目。</p>{/each}</div>
+            {:else if item.widgetId === "view.board" && dataSource(item) === "clients"}
+              <div class="qwb-board qwb-client-board">
+                {#each clientStatusGroups(item) as group}<section><header><strong>{group[0]}</strong><span>{group[1].length}</span></header><div class="qwb-board-column-body">{#each group[1] as client}<article class="qwb-board-card"><button class="qwb-board-card-main" on:click={() => controller.openPath(client.path)}><strong>{client.name}</strong><small>{client.organizationType || client.businessDomains || "客户"}</small><time>{client.followupDate || "未安排跟进"}</time></button></article>{/each}</div></section>{:else}<p class="qwb-empty">暂无客户关系数据。</p>{/each}
+              </div>
+            {:else if item.widgetId === "view.board" && dataSource(item) === "suppliers"}
+              <div class="qwb-board qwb-project-board">
+                {#each [...new Map(scopedSuppliers(item).map((supplier) => [supplier.status || "未设置", scopedSuppliers(item).filter((entry) => (entry.status || "未设置") === (supplier.status || "未设置"))])).entries()] as group}<section><header><strong>{group[0]}</strong><span>{group[1].length}</span></header><div class="qwb-board-column-body">{#each group[1] as supplier}<article class="qwb-board-card"><button class="qwb-board-card-main" on:click={() => controller.openPath(supplier.path)}><strong>{supplier.name}</strong><small>{supplier.detail || supplier.related || "供应商"}</small></button></article>{/each}</div></section>{:else}<p class="qwb-empty">暂无供应商。</p>{/each}
+              </div>
             {:else if item.widgetId === "projects.board" || (item.widgetId === "view.board" && dataSource(item) === "projects")}
               <div class="qwb-board qwb-project-board">
                 {#each projectStatusGroups(item) as group}
@@ -1449,25 +1703,53 @@
                 {:else}<p class="qwb-empty">暂无项目。</p>{/each}
               </div>
             {:else if item.widgetId === "projects.summary" || item.widgetId === "view.detail"}
-              {#each selectedProject(item) ? [selectedProject(item)!] : [] as project}
-                <div class="qwb-project-summary"><button class="qwb-summary-title" on:click={() => controller.openPath(project.path)}><span class="qwb-entity-icon project">P</span><span><strong>{project.name}</strong><small>{project.client || "未关联客户"}</small></span></button><dl><div><dt>类型</dt><dd>{project.projectType || "未设置"}</dd></div><div><dt>状态</dt><dd>{project.status || "开放"}</dd></div><div><dt>阶段</dt><dd>{project.phase || "未设置"}</dd></div><div><dt>目标日期</dt><dd>{project.due || "未设置"}</dd></div></dl><p>{project.detail || "尚未填写明确下一步。"}</p><div class="qwb-summary-actions"><button on:click={() => (sharedProjectPath = project.path)}>设为共享项目</button><button on:click={() => controller.openYolo(project.path)}>YOLO</button></div></div>
-              {:else}<p class="qwb-empty">请选择或配置一个项目。</p>{/each}
+              {#if dataSource(item) === "clients"}
+                {#each selectedClient(item) ? [selectedClient(item)!] : [] as client}<div class="qwb-project-summary qwb-client-summary"><button class="qwb-summary-title" on:click={() => controller.openPath(client.path)}><span class="qwb-entity-icon client">C</span><span><strong>{client.name}</strong><small>{client.businessDomains || "未填写业务领域"}</small></span><em>{client.relationshipStatus || "未设置"}</em></button><dl><div><dt>机构类型</dt><dd>{client.organizationType || "未设置"}</dd></div><div><dt>关系状态</dt><dd>{client.relationshipStatus || "未设置"}</dd></div><div><dt>跟进日期</dt><dd>{client.followupDate || "未安排"}</dd></div><div><dt>开放项目</dt><dd>{projectsForClient(client.path).length}</dd></div><div><dt>未完成行动</dt><dd>{tasksForClient(client.path).length}</dd></div><div><dt>相关会议</dt><dd>{meetingsForClient(client.path).length}</dd></div></dl><div class="qwb-project-next"><small>客户摘要</small><p>{client.detail || "尚未填写客户摘要。"}</p></div><div class="qwb-summary-actions"><button disabled={sharedClientPath === client.path} on:click={() => (sharedClientPath = client.path)}>{sharedClientPath === client.path ? "当前共享客户" : "设为共享客户"}</button><button on:click={() => controller.openPath(client.path)}>打开客户</button><button on:click={() => controller.openYolo(client.path)}>YOLO</button></div></div>{:else}<p class="qwb-empty">请先用客户选择器选择客户。</p>{/each}
+              {:else if dataSource(item) === "meetings"}
+                {#each selectedMeeting(item) ? [selectedMeeting(item)!] : [] as meeting}<div class="qwb-project-summary"><button class="qwb-summary-title" on:click={() => controller.openPath(meeting.path)}><span class="qwb-entity-icon meeting">M</span><span><strong>{meeting.name}</strong><small>{meeting.project || meeting.client || "未关联"}</small></span><em>{meeting.due || "未设置日期"}</em></button><dl><div><dt>状态</dt><dd>{meeting.status || "未设置"}</dd></div><div><dt>项目</dt><dd>{meeting.project || "未关联"}</dd></div><div><dt>客户</dt><dd>{meeting.client || "未关联"}</dd></div><div><dt>行动项</dt><dd>{snapshot.tasks.filter((task) => task.path === meeting.path && !task.completed).length}</dd></div></dl><div class="qwb-summary-actions"><button on:click={() => (sharedMeetingPath = meeting.path)}>设为共享会议</button><button on:click={() => controller.openPath(meeting.path)}>打开会议</button><button on:click={() => controller.openYolo(meeting.path)}>YOLO</button></div></div>{:else}<p class="qwb-empty">请先选择会议。</p>{/each}
+              {:else if dataSource(item) === "suppliers"}
+                {#each selectedSupplier(item) ? [selectedSupplier(item)!] : [] as supplier}<div class="qwb-project-summary"><button class="qwb-summary-title" on:click={() => controller.openPath(supplier.path)}><span class="qwb-entity-icon supplier">S</span><span><strong>{supplier.name}</strong><small>{supplier.detail || supplier.related || "供应商"}</small></span><em>{supplier.status || "未设置"}</em></button><dl><div><dt>状态</dt><dd>{supplier.status || "未设置"}</dd></div><div><dt>关联</dt><dd>{supplier.related || "未关联"}</dd></div><div><dt>更新时间</dt><dd>{supplier.updatedAt ? new Date(supplier.updatedAt).toLocaleDateString("zh-CN") : "未知"}</dd></div></dl><div class="qwb-summary-actions"><button on:click={() => (sharedSupplierPath = supplier.path)}>设为共享供应商</button><button on:click={() => controller.openPath(supplier.path)}>打开供应商</button><button on:click={() => controller.openYolo(supplier.path)}>YOLO</button></div></div>{:else}<p class="qwb-empty">请先选择供应商。</p>{/each}
+              {:else}
+                {#each selectedProject(item) ? [selectedProject(item)!] : [] as project}<div class="qwb-project-summary"><button class="qwb-summary-title" on:click={() => controller.openPath(project.path)}><span class="qwb-entity-icon project">P</span><span><strong>{project.name}</strong><small>{projectClientLabel(project)}</small></span><em>{project.status || "开放"}</em></button><dl><div><dt>客户</dt><dd>{projectClientLabel(project)}</dd></div><div><dt>类型</dt><dd>{project.projectType || "未设置"}</dd></div><div><dt>阶段</dt><dd>{project.phase || "未设置"}</dd></div><div><dt>目标日期</dt><dd>{project.due || "未设置"}</dd></div><div><dt>任务</dt><dd>{projectHealth(project).completed}/{projectHealth(project).completed + projectHealth(project).open} 已完成</dd></div><div><dt>最近更新</dt><dd>{projectUpdatedLabel(project)}</dd></div></dl><div class="qwb-project-next"><small>明确下一步</small><p>{project.detail || "尚未填写明确下一步。"}</p></div><div class="qwb-summary-actions"><button disabled={sharedProjectPath === project.path} on:click={() => (sharedProjectPath = project.path)}>{sharedProjectPath === project.path ? "当前共享项目" : "设为共享项目"}</button><button on:click={() => controller.openPath(project.path)}>打开项目</button><button on:click={() => controller.openYolo(project.path)}>YOLO</button></div></div>{:else}<p class="qwb-empty">请选择或配置一个项目。</p>{/each}
+              {/if}
             {:else if item.widgetId === "projects.health" || (item.widgetId === "view.metrics" && metricKind(item) === "health")}
-              <div class="qwb-health-list">{#each scopedProjects(item) as project}<button on:click={() => controller.openPath(project.path)}><i class={projectHealth(project).level}></i><span><strong>{project.name}</strong><small>{projectHealth(project).reasons.join(" · ") || "没有发现风险信号"}</small></span><em>{healthLabel(projectHealth(project).level)}</em></button>{:else}<p class="qwb-empty">请选择或配置项目。</p>{/each}</div>
+              <div class="qwb-health-list">{#each scopedProjects(item) as project}<button on:click={() => controller.openPath(project.path)}><header><i class={projectHealth(project).level}></i><span><strong>{project.name}</strong><small>{projectClientLabel(project)}</small></span><em class={projectHealth(project).level}>{healthLabel(projectHealth(project).level)}</em></header><p>{projectHealth(project).reasons.join(" · ") || "没有发现风险信号"}</p><dl><div><dt>逾期</dt><dd>{projectHealth(project).overdue}</dd></div><div><dt>7 天内</dt><dd>{projectHealth(project).dueSoon}</dd></div><div><dt>待处理</dt><dd>{projectHealth(project).open}</dd></div><div><dt>未安排</dt><dd>{projectHealth(project).unscheduled}</dd></div></dl></button>{:else}<p class="qwb-empty">请选择或配置项目。</p>{/each}</div>
             {:else if item.widgetId === "projects.progress" || (item.widgetId === "view.metrics" && metricKind(item) === "progress")}
-              <div class="qwb-progress-list">{#each scopedProjects(item) as project}<button on:click={() => controller.openPath(project.path)}><span><strong>{project.name}</strong><small>{projectHealth(project).completed} 已完成 · {projectHealth(project).open} 待处理 · {projectHealth(project).overdue} 逾期</small></span><div><i style={`width:${projectHealth(project).progress}%`}></i></div><em>{projectHealth(project).progress}%</em></button>{:else}<p class="qwb-empty">暂无进度数据。</p>{/each}</div>
+              <div class="qwb-progress-list">{#each scopedProjects(item) as project}<button on:click={() => controller.openPath(project.path)}><header><span><strong>{project.name}</strong><small>{projectClientLabel(project)}</small></span><em>{projectHealth(project).progress}%</em></header><div class="qwb-progress-track"><i style={`width:${projectHealth(project).progress}%`}></i></div><dl><div><dt>已完成</dt><dd>{projectHealth(project).completed}</dd></div><div><dt>未完成</dt><dd>{projectHealth(project).open}</dd></div><div><dt>已逾期</dt><dd>{projectHealth(project).overdue}</dd></div><div><dt>未来 7 天</dt><dd>{projectHealth(project).dueSoon}</dd></div></dl></button>{:else}<p class="qwb-empty">暂无进度数据。</p>{/each}</div>
             {:else if item.widgetId === "projects.meetings" || (item.widgetId === "view.list" && dataSource(item) === "meetings")}
-              {#each selectedProject(item) ? [selectedProject(item)!] : [] as project}<p class="qwb-widget-hint">{project.name}的相关会议</p><div class="qwb-entity-list compact">{#each meetingsForProject(project.path) as meeting}<button on:click={() => controller.openPath(meeting.path)}><span class="qwb-entity-icon meeting">M</span><span><strong>{meeting.name}</strong><small>{meeting.due || meeting.status || "会议记录"}</small></span><i>›</i></button>{:else}<p class="qwb-empty">暂无关联会议。</p>{/each}</div><button class="qwb-text-action" on:click={() => openCreate("meeting", project.path)}>＋ 创建会议</button>{:else}<p class="qwb-empty">请选择或配置项目。</p>{/each}
+              {#if queryMode(item) === "client-meetings"}
+                {#each selectedClient(item) ? [selectedClient(item)!] : [] as client}<p class="qwb-widget-hint">{client.name}的相关会议</p><div class="qwb-entity-list compact">{#each meetingsForClient(client.path) as meeting}<button on:click={() => controller.openPath(meeting.path)}><span class="qwb-entity-icon meeting">M</span><span><strong>{meeting.name}</strong><small>{meeting.due || meeting.status || "会议记录"}</small></span><i>›</i></button>{:else}<p class="qwb-empty">暂无关联会议。</p>{/each}</div><button class="qwb-text-action" on:click={() => openCreate("meeting", client.path, "client")}>＋ 创建会议</button>{:else}<p class="qwb-empty">请先选择客户。</p>{/each}
+              {:else if queryMode(item) === "all" || item.presetId === "meetings.list"}
+                <div class="qwb-widget-search"><input value={widgetSearch[itemKey(item)] ?? ""} placeholder="搜索会议" on:input={(event) => (widgetSearch = { ...widgetSearch, [itemKey(item)]: (event.currentTarget as HTMLInputElement).value })} /><span>{scopedMeetings(item).length}</span></div><div class="qwb-entity-list compact">{#each scopedMeetings(item) as meeting}<button on:click={() => controller.openPath(meeting.path)}><span class="qwb-entity-icon meeting">M</span><span><strong>{meeting.name}</strong><small>{meeting.due || meeting.project || meeting.client || "会议记录"}</small></span><i>›</i></button>{:else}<p class="qwb-empty">暂无会议记录。</p>{/each}</div><button class="qwb-text-action" on:click={() => openCreate("meeting")}>＋ 新建会议</button>
+              {:else}
+                {#each selectedProject(item) ? [selectedProject(item)!] : [] as project}<p class="qwb-widget-hint">{project.name}的相关会议</p><div class="qwb-entity-list compact">{#each meetingsForProject(project.path) as meeting}<button on:click={() => controller.openPath(meeting.path)}><span class="qwb-entity-icon meeting">M</span><span><strong>{meeting.name}</strong><small>{meeting.due || meeting.status || "会议记录"}</small></span><i>›</i></button>{:else}<p class="qwb-empty">暂无关联会议。</p>{/each}</div><button class="qwb-text-action" on:click={() => openCreate("meeting", project.path)}>＋ 创建会议</button>{:else}<p class="qwb-empty">请选择或配置项目。</p>{/each}
+              {/if}
             {:else if item.widgetId === "projects.actions" || (item.widgetId === "view.list" && queryMode(item) === "meeting-actions")}
-              <div class="qwb-task-list">{#each scopedTasks(item).filter((task) => task.scope === "meeting-draft") as task (task.id)}<div class="qwb-task-row"><button class="qwb-link" on:click={() => controller.openPath(task.path)}>{task.text}<small>{task.sourceName}</small></button><time>{task.due || ""}</time><button class="qwb-row-action" disabled={!controller.settings.writesEnabled} on:click={() => openMigration(task)}>迁移</button></div>{:else}<p class="qwb-empty">没有待迁移的会议行动。</p>{/each}</div>
+              <div class="qwb-task-list">{#each scopedTasks(item).filter((task) => task.scope === "meeting-draft") as task (task.id)}<div class="qwb-task-row"><button class="qwb-link" on:click={() => controller.openPath(task.path)}>{task.text}<small>{task.sourceName}</small></button><time>{task.due || ""}</time><button class="qwb-row-action" disabled={!controller.settings.writesEnabled} on:click={() => openMigration(task)}>迁移</button></div>{:else}<p class="qwb-empty">没有待迁移的会议行动。</p>{/each}</div>{#if scopedTasks(item).some((task) => task.scope === "meeting-draft")}<button class="qwb-text-action" on:click={() => openMigration()}>批量迁移全部会议行动</button>{/if}
             {:else if item.widgetId === "projects.risks" || (item.widgetId === "view.list" && dataSource(item) === "projects" && queryMode(item) === "risks")}
               <div class="qwb-risk-list">{#each scopedProjects(item).filter((project) => projectHealth(project).level !== "healthy") as project}<button on:click={() => controller.openPath(project.path)}><strong>{project.name}</strong><span>{#each projectHealth(project).reasons as reason}<small>{reason}</small>{:else}<small>项目信息不足，暂时无法判断。</small>{/each}</span><em class={projectHealth(project).level}>{healthLabel(projectHealth(project).level)}</em></button>{:else}<p class="qwb-empty">当前没有识别到项目风险。</p>{/each}</div>
             {:else if item.widgetId === "projects.activity" || (item.widgetId === "view.timeline" && queryMode(item) === "project-activity")}
               <div class="qwb-activity-list">{#each [...scopedProjects(item).map((project) => ({ ...project, activityType: "项目" })), ...snapshot.meetings.map((meeting) => ({ ...meeting, activityType: "会议" }))].sort((left, right) => (right.updatedAt ?? 0) - (left.updatedAt ?? 0)).slice(0, configLimit(item)) as entry}<button on:click={() => controller.openPath(entry.path)}><time>{entry.updatedAt ? new Date(entry.updatedAt).toLocaleDateString("zh-CN") : ""}</time><span><strong>{entry.name}</strong><small>{entry.activityType} · {entry.detail || entry.status || "最近修改"}</small></span></button>{:else}<p class="qwb-empty">暂无最近动态。</p>{/each}</div>
             {:else if item.widgetId === "projects.relations" || item.widgetId === "view.relations"}
-              {#each selectedProject(item) ? [selectedProject(item)!] : [] as project}<div class="qwb-relations"><section><strong>客户</strong>{#each resolveEntityReference(project.client, snapshot.clients) ? [resolveEntityReference(project.client, snapshot.clients)!] : [] as client}<button on:click={() => controller.openPath(client.path)}>{client.name}</button>{:else}<span>未关联</span>{/each}</section><section><strong>会议</strong>{#each meetingsForProject(project.path).slice(0, 6) as meeting}<button on:click={() => controller.openPath(meeting.path)}>{meeting.name}</button>{:else}<span>暂无</span>{/each}</section><section><strong>知识</strong>{#each relatedKnowledge(project.path).slice(0, 6) as note}<button on:click={() => controller.openPath(note.path)}>{note.name}</button>{:else}<span>暂无</span>{/each}</section></div>{:else}<p class="qwb-empty">请选择或配置项目。</p>{/each}
+              {#if dataSource(item) === "clients"}
+                {#each selectedClient(item) ? [selectedClient(item)!] : [] as client}<div class="qwb-relations"><section><strong>项目</strong>{#each projectsForClient(client.path).slice(0, 6) as project}<button on:click={() => controller.openPath(project.path)}>{project.name}</button>{:else}<span>暂无</span>{/each}</section><section><strong>会议</strong>{#each meetingsForClient(client.path).slice(0, 6) as meeting}<button on:click={() => controller.openPath(meeting.path)}>{meeting.name}</button>{:else}<span>暂无</span>{/each}</section><section><strong>未完成行动</strong>{#each tasksForClient(client.path).slice(0, 6) as task}<button on:click={() => controller.openPath(task.path)}>{task.text}</button>{:else}<span>暂无</span>{/each}</section></div>{:else}<p class="qwb-empty">请先选择客户。</p>{/each}
+              {:else if dataSource(item) === "meetings"}
+                {#each selectedMeeting(item) ? [selectedMeeting(item)!] : [] as meeting}<div class="qwb-relations"><section><strong>项目</strong>{#each resolveProject(meeting.project) ? [resolveProject(meeting.project)!] : [] as project}<button on:click={() => controller.openPath(project.path)}>{project.name}</button>{:else}<span>未关联</span>{/each}</section><section><strong>客户</strong>{#each resolveEntityReference(meeting.client, snapshot.clients) ? [resolveEntityReference(meeting.client, snapshot.clients)!] : [] as client}<button on:click={() => controller.openPath(client.path)}>{client.name}</button>{:else}<span>未关联</span>{/each}</section><section><strong>行动项</strong>{#each snapshot.tasks.filter((task) => task.path === meeting.path && !task.completed).slice(0, 8) as task}<button on:click={() => controller.openPath(task.path)}>{task.text}</button>{:else}<span>暂无</span>{/each}</section></div>{:else}<p class="qwb-empty">请先选择会议。</p>{/each}
+              {:else if dataSource(item) === "suppliers"}
+                {#each selectedSupplier(item) ? [selectedSupplier(item)!] : [] as supplier}<div class="qwb-relations"><section><strong>已记录关联</strong><span>{supplier.related || "暂无"}</span></section><section><strong>相关项目</strong>{#each snapshot.projects.filter((project) => JSON.stringify(project).includes(supplier.name)).slice(0, 6) as project}<button on:click={() => controller.openPath(project.path)}>{project.name}</button>{:else}<span>暂无明确关联</span>{/each}</section><section><strong>相关会议</strong>{#each snapshot.meetings.filter((meeting) => JSON.stringify(meeting).includes(supplier.name)).slice(0, 6) as meeting}<button on:click={() => controller.openPath(meeting.path)}>{meeting.name}</button>{:else}<span>暂无明确关联</span>{/each}</section></div>{:else}<p class="qwb-empty">请先选择供应商。</p>{/each}
+              {:else}
+                {#each selectedProject(item) ? [selectedProject(item)!] : [] as project}<div class="qwb-relations"><section><strong>客户</strong>{#each resolveEntityReference(project.client, snapshot.clients) ? [resolveEntityReference(project.client, snapshot.clients)!] : [] as client}<button on:click={() => controller.openPath(client.path)}>{client.name}</button>{:else}<span>未关联</span>{/each}</section><section><strong>会议</strong>{#each meetingsForProject(project.path).slice(0, 6) as meeting}<button on:click={() => controller.openPath(meeting.path)}>{meeting.name}</button>{:else}<span>暂无</span>{/each}</section><section><strong>知识</strong>{#each relatedKnowledge(project.path).slice(0, 6) as note}<button on:click={() => controller.openPath(note.path)}>{note.name}</button>{:else}<span>暂无</span>{/each}</section></div>{:else}<p class="qwb-empty">请选择或配置项目。</p>{/each}
+              {/if}
             {:else if item.widgetId === "projects.quick-actions" || item.widgetId === "control.actions"}
-              <div class="qwb-create-grid"><button on:click={() => openCreate("project")}><span>＋</span>新建项目</button><button on:click={() => openTask(scopedProjectPath(item))}><span>＋</span>项目任务</button><button on:click={() => openCreate("meeting", scopedProjectPath(item))}><span>＋</span>项目会议</button><button disabled={!selectedProject(item)} on:click={() => selectedProject(item) && controller.openPath(selectedProject(item)!.path)}><span>↗</span>打开项目</button></div><button class="qwb-button qwb-button-primary qwb-full" disabled={!selectedProject(item)} on:click={() => selectedProject(item) && controller.openYolo(selectedProject(item)!.path)}>用当前项目打开 YOLO</button>
+              {#if dataSource(item) === "clients"}
+                <div class="qwb-create-grid"><button on:click={() => openCreate("client")}><span>＋</span>新建客户</button><button disabled={!selectedClient(item)} on:click={() => selectedClient(item) && openCreate("project", selectedClient(item)!.path, "client")}><span>＋</span>客户项目</button><button disabled={!selectedClient(item)} on:click={() => selectedClient(item) && openCreate("meeting", selectedClient(item)!.path, "client")}><span>＋</span>客户会议</button><button disabled={!selectedClient(item)} on:click={() => selectedClient(item) && controller.openPath(selectedClient(item)!.path)}><span>↗</span>打开客户</button></div><button class="qwb-button qwb-button-primary qwb-full" disabled={!selectedClient(item)} on:click={() => selectedClient(item) && controller.openYolo(selectedClient(item)!.path)}>用当前客户打开 YOLO</button>
+              {:else if dataSource(item) === "meetings"}
+                <div class="qwb-create-grid"><button on:click={() => openCreate("meeting")}><span>＋</span>新建会议</button><button disabled={!selectedMeeting(item)} on:click={() => selectedMeeting(item) && controller.openPath(selectedMeeting(item)!.path)}><span>↗</span>打开会议</button><button disabled={!selectedMeeting(item)} on:click={() => selectedMeeting(item) && openMigration()}><span>⇢</span>迁移行动</button></div><button class="qwb-button qwb-button-primary qwb-full" disabled={!selectedMeeting(item)} on:click={() => selectedMeeting(item) && controller.openYolo(selectedMeeting(item)!.path)}>用当前会议打开 YOLO</button>
+              {:else if dataSource(item) === "suppliers"}
+                <div class="qwb-create-grid"><button on:click={() => openCreate("supplier")}><span>＋</span>新建供应商</button><button disabled={!selectedSupplier(item)} on:click={() => selectedSupplier(item) && controller.openPath(selectedSupplier(item)!.path)}><span>↗</span>打开供应商</button></div><button class="qwb-button qwb-button-primary qwb-full" disabled={!selectedSupplier(item)} on:click={() => selectedSupplier(item) && controller.openYolo(selectedSupplier(item)!.path)}>用当前供应商打开 YOLO</button>
+              {:else}
+                <div class="qwb-create-grid"><button on:click={() => openCreate("project")}><span>＋</span>新建项目</button><button on:click={() => openTask(scopedProjectPath(item))}><span>＋</span>项目任务</button><button on:click={() => openCreate("meeting", scopedProjectPath(item))}><span>＋</span>项目会议</button><button disabled={!selectedProject(item)} on:click={() => selectedProject(item) && controller.openPath(selectedProject(item)!.path)}><span>↗</span>打开项目</button></div><button class="qwb-button qwb-button-primary qwb-full" disabled={!selectedProject(item)} on:click={() => selectedProject(item) && controller.openYolo(selectedProject(item)!.path)}>用当前项目打开 YOLO</button>
+              {/if}
             {:else if item.widgetId === "projects.milestones" || (item.widgetId === "view.list" && dataSource(item) === "projects" && queryMode(item) === "milestones")}
               <div class="qwb-entity-list compact">
                 {#each snapshot.projects.filter((project) => project.due).sort((left, right) => (left.due ?? "").localeCompare(right.due ?? "")).slice(0, 10) as project}
@@ -1498,9 +1780,11 @@
               </div>
               <button class="qwb-text-action" on:click={() => openCreate("meeting")}>＋ 新建会议</button>
             {:else if item.widgetId === "view.list" && dataSource(item) === "clients"}
-              <div class="qwb-widget-search"><input value={widgetSearch[itemKey(item)] ?? ""} placeholder="搜索客户" on:input={(event) => (widgetSearch = { ...widgetSearch, [itemKey(item)]: (event.currentTarget as HTMLInputElement).value })} /><span>{snapshot.clients.length}</span></div>
-              <div class="qwb-entity-list compact">{#each snapshot.clients.filter((client) => !widgetSearch[itemKey(item)] || `${client.name} ${client.path} ${client.aliases.join(" ")}`.toLocaleLowerCase("zh-CN").includes(widgetSearch[itemKey(item)].toLocaleLowerCase("zh-CN"))).slice(0, configLimit(item)) as client}<button on:click={() => controller.openPath(client.path)}><span class="qwb-entity-icon client">C</span><span><strong>{client.name}</strong><small>{client.status || "客户"}</small></span><i>›</i></button>{:else}<p class="qwb-empty">暂无匹配客户。</p>{/each}</div>
+              <div class="qwb-widget-search"><input value={widgetSearch[itemKey(item)] ?? ""} placeholder="搜索客户名称、别名或业务领域" on:input={(event) => (widgetSearch = { ...widgetSearch, [itemKey(item)]: (event.currentTarget as HTMLInputElement).value })} /><span>{clientRowsForWidget(item).length}</span></div>
+              <div class="qwb-client-list">{#each clientRowsForWidget(item) as client}<button on:click={() => controller.openPath(client.path)}><span class="qwb-entity-icon client">C</span><span><strong>{client.name}</strong><small>{client.organizationType || client.businessDomains || "客户"}</small></span><em>{client.relationshipStatus || "未设置关系"}</em><time>{clientFollowupLabel(client)}</time></button>{:else}<p class="qwb-empty">暂无匹配客户。</p>{/each}</div>
               <button class="qwb-text-action" on:click={() => openCreate("client")}>＋ 新建客户</button>
+            {:else if item.widgetId === "view.list" && dataSource(item) === "suppliers"}
+              <div class="qwb-widget-search"><input value={widgetSearch[itemKey(item)] ?? ""} placeholder="搜索供应商" on:input={(event) => (widgetSearch = { ...widgetSearch, [itemKey(item)]: (event.currentTarget as HTMLInputElement).value })} /><span>{scopedSuppliers(item).length}</span></div><div class="qwb-client-list">{#each scopedSuppliers(item) as supplier}<button on:click={() => controller.openPath(supplier.path)}><span class="qwb-entity-icon supplier">S</span><span><strong>{supplier.name}</strong><small>{supplier.detail || supplier.related || "供应商"}</small></span><em>{supplier.status || "未设置"}</em><time>{supplier.updatedAt ? new Date(supplier.updatedAt).toLocaleDateString("zh-CN") : ""}</time></button>{:else}<p class="qwb-empty">暂无供应商。</p>{/each}</div><button class="qwb-text-action" on:click={() => openCreate("supplier")}>＋ 新建供应商</button>
             {:else if item.widgetId === "view.list" && dataSource(item) === "knowledge"}
               <div class="qwb-entity-list">{#each snapshot.knowledge.slice(0, configLimit(item)) as entry}<button on:click={() => controller.openPath(entry.path)}><span class="qwb-entity-icon knowledge">K</span><span><strong>{entry.name}</strong><small>{entry.status || "待处理"}{entry.related ? ` · ${entry.related}` : ""}</small></span><i>›</i></button>{:else}<p class="qwb-empty">暂无知识条目。</p>{/each}</div>
             {:else if item.widgetId.startsWith("clients.")}
@@ -1602,11 +1886,25 @@
       <header><div><span class="qwb-eyebrow">WIDGET INSTANCE</span><h2 id="qwb-widget-settings-title">{widgetTitle(editingWidget)}设置</h2></div><button aria-label="关闭" on:click={() => (editingWidget = undefined)}>×</button></header>
       <label>组件名称<input bind:value={editingTitle} placeholder="例如：客户 A 待跟进" /></label>
       {#if editingWidget.widgetId.startsWith("view.") || editingWidget.widgetId.startsWith("control.") || editingWidget.widgetId.startsWith("tasks.") || editingWidget.widgetId.startsWith("projects.")}
-        <label>数据源<select value={String(configSection(editingConfig, "source").kind ?? (editingWidget.widgetId.startsWith("projects.") ? "projects" : "tasks"))} on:change={(event) => updateEditingSource({ kind: (event.currentTarget as HTMLSelectElement).value })}><option value="tasks">任务</option><option value="projects">项目</option><option value="clients">客户</option><option value="meetings">会议</option><option value="knowledge">知识</option><option value="mixed">混合</option></select></label>
-        <label>数据范围<select value={String(configSection(editingConfig, "source").scopeMode ?? editingConfig.scopeMode ?? "all")} on:change={(event) => updateEditingSource({ scopeMode: (event.currentTarget as HTMLSelectElement).value })}><option value="all">全部数据</option><option value="shared">跟随共享项目</option><option value="context">跟随当前笔记</option><option value="fixed">固定项目</option></select></label>
-        {#if (configSection(editingConfig, "source").scopeMode ?? editingConfig.scopeMode) === "fixed"}<label>固定项目<select value={String(configSection(editingConfig, "source").projectPath ?? editingConfig.projectPath ?? "")} on:change={(event) => updateEditingSource({ projectPath: (event.currentTarget as HTMLSelectElement).value })}><option value="">选择项目</option>{#each snapshot.projects as project}<option value={project.path}>{project.name}</option>{/each}</select></label>{/if}
+        <label>数据源<select value={String(configSection(editingConfig, "source").kind ?? (editingWidget.widgetId.startsWith("projects.") ? "projects" : "tasks"))} on:change={(event) => updateEditingSource({ kind: (event.currentTarget as HTMLSelectElement).value })}><option value="tasks">任务</option><option value="projects">项目</option><option value="clients">客户</option><option value="suppliers">供应商</option><option value="meetings">会议</option><option value="knowledge">知识</option><option value="mixed">混合</option></select></label>
+        <label>数据范围<select value={String(configSection(editingConfig, "source").scopeMode ?? editingConfig.scopeMode ?? "all")} on:change={(event) => updateEditingSource({ scopeMode: (event.currentTarget as HTMLSelectElement).value })}><option value="all">全部数据</option><option value="shared">跟随同类选择器</option><option value="context">跟随当前笔记</option><option value="fixed">固定实体</option></select></label>
+        {#if (configSection(editingConfig, "source").scopeMode ?? editingConfig.scopeMode) === "fixed"}
+          {#if String(configSection(editingConfig, "source").kind ?? "tasks") === "clients"}
+            <label>固定客户<select value={String(configSection(editingConfig, "source").clientPath ?? editingConfig.clientPath ?? "")} on:change={(event) => updateEditingSource({ clientPath: (event.currentTarget as HTMLSelectElement).value })}><option value="">选择客户</option>{#each snapshot.clients as client}<option value={client.path}>{client.name}</option>{/each}</select></label>
+          {:else if String(configSection(editingConfig, "source").kind ?? "tasks") === "meetings"}
+            <label>固定会议<select value={String(configSection(editingConfig, "source").meetingPath ?? "")} on:change={(event) => updateEditingSource({ meetingPath: (event.currentTarget as HTMLSelectElement).value })}><option value="">选择会议</option>{#each snapshot.meetings as meeting}<option value={meeting.path}>{meeting.name}</option>{/each}</select></label>
+          {:else if String(configSection(editingConfig, "source").kind ?? "tasks") === "suppliers"}
+            <label>固定供应商<select value={String(configSection(editingConfig, "source").supplierPath ?? "")} on:change={(event) => updateEditingSource({ supplierPath: (event.currentTarget as HTMLSelectElement).value })}><option value="">选择供应商</option>{#each snapshot.suppliers as supplier}<option value={supplier.path}>{supplier.name}</option>{/each}</select></label>
+          {:else}
+            <label>固定项目<select value={String(configSection(editingConfig, "source").projectPath ?? editingConfig.projectPath ?? "")} on:change={(event) => updateEditingSource({ projectPath: (event.currentTarget as HTMLSelectElement).value })}><option value="">选择项目</option>{#each snapshot.projects as project}<option value={project.path}>{project.name}</option>{/each}</select></label>
+          {/if}
+        {/if}
         <label>客户筛选<select value={String(configSection(editingConfig, "source").clientPath ?? editingConfig.clientPath ?? "")} on:change={(event) => updateEditingSource({ clientPath: (event.currentTarget as HTMLSelectElement).value })}><option value="">全部客户</option>{#each snapshot.clients as client}<option value={client.path}>{client.name}</option>{/each}</select></label>
         <label>项目类型<select value={String(configSection(editingConfig, "source").projectType ?? editingConfig.projectType ?? "")} on:change={(event) => updateEditingSource({ projectType: (event.currentTarget as HTMLSelectElement).value })}><option value="">全部类型</option>{#each focusProjectTypes() as projectType}<option value={projectType}>{projectType}</option>{/each}</select></label>
+        {#if String(configSection(editingConfig, "source").kind ?? "tasks") === "clients"}
+          <label>关系状态<select value={String(configSection(editingConfig, "query").relationshipStatus ?? "")} on:change={(event) => updateEditingQuery({ relationshipStatus: (event.currentTarget as HTMLSelectElement).value })}><option value="">全部关系状态</option>{#each clientRelationshipStatuses() as status}<option value={status}>{status}</option>{/each}</select></label>
+          <label>机构类型<select value={String(configSection(editingConfig, "query").organizationType ?? "")} on:change={(event) => updateEditingQuery({ organizationType: (event.currentTarget as HTMLSelectElement).value })}><option value="">全部机构类型</option>{#each clientOrganizationTypes() as type}<option value={type}>{type}</option>{/each}</select></label>
+        {/if}
         <label>最多显示<input type="number" min="1" max="200" value={Number(configSection(editingConfig, "query").limit ?? editingConfig.limit ?? 30)} on:input={(event) => updateEditingQuery({ limit: Number((event.currentTarget as HTMLInputElement).value) || 30 })} /></label>
         {#if String(configSection(editingConfig, "source").kind ?? "tasks") === "tasks" || editingWidget.widgetId.startsWith("tasks.")}
           <fieldset><legend>任务来源</legend>{#each [["project", "项目"], ["client", "客户"], ["meeting-draft", "会议草稿"]] as option}<label class="qwb-inline-check"><input type="checkbox" checked={editingTaskScopes().includes(option[0])} on:change={() => toggleEditingTaskScope(option[0] as TaskRecord["scope"])} />{option[1]}</label>{/each}</fieldset>
@@ -1648,14 +1946,32 @@
         <div class="qwb-form-row"><label>截止日期<input type="date" bind:value={taskDue} /></label><label>优先级<select bind:value={taskPriority}><option value="highest">最高</option><option value="high">高</option><option value="normal">普通</option><option value="low">低</option><option value="lowest">最低</option></select></label></div>
         <div class="qwb-modal-actions"><button class="qwb-button qwb-button-subtle" on:click={() => (dialog = null)}>取消</button><button class="qwb-button qwb-button-primary" disabled={!controller.settings.writesEnabled || busy} on:click={submitTaskEdit}>保存</button></div>
       {:else if dialog === "migrate"}
-        <p>预览：将 {migrationTasks.length} 条会议草稿迁移到同一目标项目。成功项会标记完成并写入稳定来源标记；失败时保留回执，可修复后重试。</p>
+        <p>预览：将 {migrationTasks.length} 条会议草稿迁移到同一目标项目或客户。每条行动都有独立回执；成功项写入稳定来源标记，重复执行不会重复创建。</p>
         <div class="qwb-inline-preview">{#each migrationTasks.slice(0, 8) as task}<div>• {task.text} <small>{task.sourceName}</small></div>{/each}</div>
         <label>迁移目标<select bind:value={migrationTarget}><option value="">选择项目或客户</option><optgroup label="项目">{#each snapshot.projects as project}<option value={project.path}>{project.name}</option>{/each}</optgroup><optgroup label="客户">{#each snapshot.clients as client}<option value={client.path}>{client.name}</option>{/each}</optgroup></select></label>
-        <div class="qwb-modal-actions"><button class="qwb-button qwb-button-subtle" on:click={() => (dialog = null)}>取消</button><button class="qwb-button qwb-button-primary" disabled={!controller.settings.writesEnabled || !migrationTarget || busy} on:click={submitMigration}>预检并迁移</button></div>
+        {#if migrationBatch}
+          <div class="qwb-migration-receipt" class:partial={migrationBatch.status !== "completed"}>
+            <strong>批次 {migrationBatch.status === "completed" ? "已完成" : migrationBatch.status === "partial" ? "部分完成" : "失败"}</strong>
+            <small>已迁移 {migrationBatch.migratedCount} · 已存在 {migrationBatch.alreadyMigratedCount} · 失败 {migrationBatch.failedCount} · 跳过 {migrationBatch.skippedCount}</small>
+            {#each migrationBatch.items as result}<div><span>{result.outcome === "migrated" ? "✓" : result.outcome === "already-migrated" ? "↷" : "!"}</span><code>{result.sourcePath}</code><em>{result.message || result.outcome}</em></div>{/each}
+            {#if migrationBatch.manualRepairPaths.length}<p>需要人工检查：{migrationBatch.manualRepairPaths.join("、")}</p>{/if}
+          </div>
+        {/if}
+        <div class="qwb-modal-actions"><button class="qwb-button qwb-button-subtle" on:click={() => (dialog = null)}>关闭</button>{#if migrationBatch?.retryItems.length}<button class="qwb-button" disabled={busy} on:click={retryMigration}>继续恢复 {migrationBatch.retryItems.length} 条</button>{/if}<button class="qwb-button qwb-button-primary" disabled={!controller.settings.writesEnabled || !migrationTarget || busy || migrationBatch?.status === "completed"} on:click={submitMigration}>{migrationBatch ? "重新运行批次" : "预检并迁移"}</button></div>
       {:else if dialog === "knowledge"}
         <label>处理状态<select bind:value={knowledgeStatus}><option>待处理</option><option>待沉淀</option><option>待读</option><option>已归档</option><option>重复</option></select></label>
         <label>关联项目<select bind:value={knowledgeProject}><option value="">暂不关联</option>{#each snapshot.projects as project}<option value={project.path}>{project.name}</option>{/each}</select></label>
-        <div class="qwb-modal-actions"><button class="qwb-button qwb-button-subtle" on:click={() => (dialog = null)}>取消</button><button class="qwb-button qwb-button-primary" disabled={!controller.settings.writesEnabled || busy} on:click={submitKnowledge}>保存处理结果</button></div>
+        <div class="qwb-inline-preview"><strong>状态处理</strong><small>只更新来源笔记的 triage_status 与项目关联，不改变现有模板。</small></div>
+        <div class="qwb-modal-actions"><button class="qwb-button qwb-button-subtle" on:click={() => (dialog = null)}>取消</button><button class="qwb-button" disabled={!controller.settings.writesEnabled || busy} on:click={submitKnowledge}>仅保存状态</button></div>
+        <hr />
+        <label>正式知识标题<input bind:value={knowledgePublishTitle} /></label>
+        <div class="qwb-inline-preview"><strong>发布目标</strong><div>{controller.settings.formalKnowledgeFolder}/{knowledgePublishTitle || "未命名"}.md</div><small>{controller.settings.knowledgeTemplate ? `只读模板：${controller.settings.knowledgeTemplate}` : "使用插件内置安全模板"}</small></div>
+        {#if knowledgePublication}<pre class="qwb-template-preview">{knowledgePublication.targetPath}\n\n{knowledgePublication.targetContent}</pre>{/if}
+        <div class="qwb-modal-actions"><button class="qwb-button" disabled={!knowledgePublishTitle.trim() || busy} on:click={previewKnowledgePublication}>生成发布预览</button><button class="qwb-button qwb-button-primary" disabled={!controller.settings.writesEnabled || !knowledgePublication || busy} on:click={publishKnowledge}>确认发布</button></div>
+      {:else if dialog === "yolo-preview"}
+        <p>以下内容会复制到剪贴板并打开 YOLO。此步骤本身不修改任何 Markdown；请在 YOLO 给出安排后再决定是否执行。</p>
+        <textarea class="qwb-yolo-preview" rows="14" readonly value={yoloPrompt}></textarea>
+        <div class="qwb-modal-actions"><button class="qwb-button qwb-button-subtle" on:click={() => (dialog = null)}>取消</button><button class="qwb-button qwb-button-primary" disabled={busy} on:click={() => run(confirmYolo, "提示词已复制并打开 YOLO")}>复制并打开 YOLO</button></div>
       {/if}
     </div>
   </div>

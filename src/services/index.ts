@@ -2,6 +2,7 @@ export * from "../domain/entities";
 export * from "../domain/markdown";
 export * from "../domain/transactions";
 export * from "./entity-index";
+export * from "./knowledge-publishing-service";
 export * from "./meeting-migration-service";
 export * from "./obsidian-vault-adapter";
 export * from "./task-service";

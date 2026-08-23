@@ -6,6 +6,8 @@ import type {
 } from "../core/types";
 import type { QuietWorkbenchSettings } from "../settings";
 import type { QuickMemoEntry } from "../domain/memo";
+import type { MeetingMigrationBatchResult } from "../services/meeting-migration-service";
+import type { KnowledgePublicationInput, KnowledgePublicationPreview } from "../services/knowledge-publishing-service";
 
 export interface DiagnosticItem {
   id: string;
@@ -27,6 +29,10 @@ export interface EntitySummary {
   projectType?: string;
   client?: string;
   project?: string;
+  organizationType?: string;
+  businessDomains?: string;
+  relationshipStatus?: string;
+  followupDate?: string;
   updatedAt?: number;
 }
 
@@ -91,8 +97,11 @@ export interface WorkbenchController {
   addProjectTask(input: AddProjectTaskInput): Promise<TransactionReceipt>;
   updateTask(task: TaskRecord, patch: { completed?: boolean; due?: string | null; priority?: TaskRecord["priority"] }): Promise<TransactionReceipt>;
   migrateMeetingTask(task: TaskRecord, targetPath: string): Promise<TransactionReceipt | undefined>;
-  migrateMeetingTasks(tasks: TaskRecord[], targetPath: string): Promise<TransactionReceipt[]>;
+  migrateMeetingTasks(tasks: TaskRecord[], targetPath: string): Promise<MeetingMigrationBatchResult>;
+  retryMeetingMigration(batch: MeetingMigrationBatchResult): Promise<MeetingMigrationBatchResult>;
   updateKnowledge(path: string, status: string, projectPath?: string): Promise<TransactionReceipt>;
+  previewKnowledgePublication(input: KnowledgePublicationInput): Promise<KnowledgePublicationPreview>;
+  publishKnowledge(preview: KnowledgePublicationPreview): Promise<TransactionReceipt>;
   appendQuickMemo(text: string): Promise<TransactionReceipt>;
   openYolo(path?: string): Promise<void>;
   saveLayout(sceneId: string, items: LayoutItem[]): Promise<void>;

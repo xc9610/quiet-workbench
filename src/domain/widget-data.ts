@@ -4,6 +4,7 @@ export type TaskTimeBucket = "overdue" | "today" | "week" | "later" | "unschedul
 export type TaskBoardDateColumn = "backlog" | "due" | "next-seven" | "undated" | "done";
 export type TaskQuadrant = "important-urgent" | "important" | "urgent" | "later";
 export type ProjectHealthLevel = "healthy" | "attention" | "risk" | "unknown";
+export type ClientFollowupBucket = "overdue" | "today" | "week" | "later" | "unscheduled";
 
 export interface ProjectHealthInput {
   due?: string;
@@ -17,6 +18,8 @@ export interface ProjectHealthResult {
   completed: number;
   open: number;
   overdue: number;
+  dueSoon: number;
+  unscheduled: number;
   progress: number;
 }
 
@@ -92,24 +95,47 @@ export function suggestedTaskBoardDrop(
   };
 }
 
+export function clientFollowupBucket(
+  followupDate: string | undefined,
+  today: string,
+  weekEnd: string
+): ClientFollowupBucket {
+  if (!followupDate) return "unscheduled";
+  if (followupDate < today) return "overdue";
+  if (followupDate === today) return "today";
+  if (followupDate <= weekEnd) return "week";
+  return "later";
+}
+
 export function calculateProjectHealth(
   project: ProjectHealthInput,
-  tasks: ReadonlyArray<Pick<TaskRecord, "completed" | "due">>,
+  tasks: ReadonlyArray<Pick<TaskRecord, "completed" | "due" | "scheduled">>,
   today: string,
   now = Date.now()
 ): ProjectHealthResult {
   const completed = tasks.filter((task) => task.completed).length;
   const openTasks = tasks.filter((task) => !task.completed);
-  const overdue = openTasks.filter((task) => task.due && task.due < today).length;
+  const weekEnd = dateAfter(today, 7);
+  const overdue = openTasks.filter((task) => {
+    const date = effectiveTaskDate(task);
+    return Boolean(date && date < today);
+  }).length;
+  const dueSoon = openTasks.filter((task) => {
+    const date = effectiveTaskDate(task);
+    return Boolean(date && date >= today && date <= weekEnd);
+  }).length;
+  const unscheduled = openTasks.filter((task) => !effectiveTaskDate(task)).length;
   const reasons: string[] = [];
   if (overdue) reasons.push(`${overdue} 项任务逾期`);
   if (project.due && project.due < today) reasons.push("项目目标日期已过");
+  if (project.due && project.due >= today && project.due <= weekEnd) reasons.push("项目将在 7 天内到期");
   if (project.updatedAt && now - project.updatedAt > 14 * 86_400_000) reasons.push("超过 14 天没有更新");
   if (openTasks.length > 0 && !project.detail) reasons.push("尚未填写明确下一步");
+  if (openTasks.length >= 10) reasons.push(`${openTasks.length} 项待处理任务积压`);
   const hasData = tasks.length > 0 || Boolean(project.due || project.updatedAt || project.detail);
   const level: ProjectHealthLevel = !hasData
     ? "unknown"
-    : overdue >= 2 || Boolean(project.due && project.due < today)
+    : overdue >= 2 || openTasks.length >= 20 || Boolean(project.due && project.due < today)
       ? "risk"
       : reasons.length
         ? "attention"
@@ -120,6 +146,8 @@ export function calculateProjectHealth(
     completed,
     open: openTasks.length,
     overdue,
+    dueSoon,
+    unscheduled,
     progress: tasks.length ? Math.round((completed / tasks.length) * 100) : 0
   };
 }

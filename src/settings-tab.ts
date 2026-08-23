@@ -2,6 +2,16 @@ import { App, Modal, Notice, PluginSettingTab, Setting, normalizePath } from "ob
 import { validateLayout } from "./core/layout";
 import { createBuiltinWidgetRegistry } from "./core/widget-registry";
 import type { QuietWorkbenchSettings } from "./settings";
+import type { LayoutItem, LayoutSchema } from "./core/types";
+
+const SIDEBAR_COMPONENTS = [
+  ["core.context", "当前笔记"],
+  ["tasks.upcoming", "近期待办"],
+  ["tasks.context", "相关任务"],
+  ["projects.context", "关联项目"],
+  ["meetings.context", "相关会议"],
+  ["core.quick-create", "刷新上下文"]
+] as const;
 
 export interface QuietWorkbenchSettingsHost {
   app: App;
@@ -99,6 +109,7 @@ export class QuietWorkbenchSettingTab extends PluginSettingTab {
     this.addPathSetting(containerEl, "会议目录", "meetingFolder");
     this.addPathSetting(containerEl, "供应商目录", "supplierFolder");
     this.addPathSetting(containerEl, "知识目录", "knowledgeFolder");
+    this.addPathSetting(containerEl, "正式知识目录", "formalKnowledgeFolder");
 
     new Setting(containerEl).setName("速记").setHeading();
     this.addFilePathSetting(containerEl, "速记文件", "memoPath", "快速输入会追加到此 Markdown 文件；不会修改任何模板。");
@@ -108,6 +119,13 @@ export class QuietWorkbenchSettingTab extends PluginSettingTab {
     this.addTemplateSetting(containerEl, "客户模板", "client");
     this.addTemplateSetting(containerEl, "会议模板", "meeting");
     this.addTemplateSetting(containerEl, "供应商模板", "supplier");
+    new Setting(containerEl)
+      .setName("知识模板（可选）")
+      .setDesc("留空时使用插件内置安全模板；模板只读取，不会被插件修改，也不会执行 JavaScript。")
+      .addText((text) => text.setValue(this.host.settings.knowledgeTemplate).onChange(async (value) => {
+        this.host.settings.knowledgeTemplate = value.trim() ? normalizePath(value.trim()) : "";
+        await this.host.saveSettings();
+      }));
 
     new Setting(containerEl).setName("客户字段兼容").setHeading();
     containerEl.createEl("p", {
@@ -171,6 +189,32 @@ export class QuietWorkbenchSettingTab extends PluginSettingTab {
     const activeSidebar = this.host.settings.layouts.find(
       (layout) => layout.surface === "sidebar" && layout.id === this.host.settings.activeSidebarLayout
     );
+    if (activeSidebar) {
+      containerEl.createEl("p", { text: "常用组件可在这里排序、隐藏、折叠或移除；变更只影响侧栏布局，不会修改笔记。", cls: "setting-item-description" });
+      activeSidebar.items.slice().sort((left, right) => left.y - right.y).forEach((item, position, rows) => {
+        const label = SIDEBAR_COMPONENTS.find(([id]) => id === item.widgetId)?.[1] ?? item.widgetId;
+        new Setting(containerEl)
+          .setName(label)
+          .setDesc(item.hidden ? "已隐藏" : item.collapsed ? "已折叠" : "正在显示")
+          .addExtraButton((button) => button.setIcon("arrow-up").setTooltip("上移").setDisabled(position === 0).onClick(async () => this.moveSidebarItem(activeSidebar, rows, position, -1)))
+          .addExtraButton((button) => button.setIcon("arrow-down").setTooltip("下移").setDisabled(position === rows.length - 1).onClick(async () => this.moveSidebarItem(activeSidebar, rows, position, 1)))
+          .addToggle((toggle) => toggle.setTooltip("显示").setValue(!item.hidden).onChange(async (value) => { item.hidden = !value; await this.saveSidebarLayout(activeSidebar); this.display(); }))
+          .addToggle((toggle) => toggle.setTooltip("折叠").setValue(Boolean(item.collapsed)).onChange(async (value) => { item.collapsed = value; await this.saveSidebarLayout(activeSidebar); this.display(); }))
+          .addExtraButton((button) => button.setIcon("trash-2").setTooltip("移除").onClick(async () => { activeSidebar.items = activeSidebar.items.filter((entry) => entry !== item); await this.saveSidebarLayout(activeSidebar); this.display(); }));
+      });
+      let selectedSidebarWidget: string = SIDEBAR_COMPONENTS.find(([id]) => !activeSidebar.items.some((item) => item.widgetId === id))?.[0] ?? SIDEBAR_COMPONENTS[0][0];
+      new Setting(containerEl)
+        .setName("添加侧栏组件")
+        .addDropdown((dropdown) => { for (const [id, label] of SIDEBAR_COMPONENTS) dropdown.addOption(id, label); dropdown.setValue(selectedSidebarWidget).onChange((value) => { selectedSidebarWidget = value; }); })
+        .addButton((button) => button.setButtonText("添加").onClick(async () => {
+          if (activeSidebar.items.some((item) => item.widgetId === selectedSidebarWidget)) { new Notice("该侧栏组件已经存在，可直接调整显示或顺序"); return; }
+          const definition = createBuiltinWidgetRegistry().get(selectedSidebarWidget);
+          if (!definition?.surfaces.includes("sidebar")) { new Notice("该组件不支持侧栏"); return; }
+          activeSidebar.items.push({ widgetId: selectedSidebarWidget, x: 0, y: activeSidebar.items.length, width: 1, height: definition.defaultSize.height });
+          await this.saveSidebarLayout(activeSidebar);
+          this.display();
+        }));
+    }
     let sidebarJson = JSON.stringify(activeSidebar, null, 2);
     new Setting(containerEl)
       .setName("侧栏布局 JSON")
@@ -202,7 +246,7 @@ export class QuietWorkbenchSettingTab extends PluginSettingTab {
     });
   }
 
-  private addPathSetting(container: HTMLElement, label: string, key: "projectFolder" | "clientFolder" | "meetingFolder" | "supplierFolder" | "knowledgeFolder"): void {
+  private addPathSetting(container: HTMLElement, label: string, key: "projectFolder" | "clientFolder" | "meetingFolder" | "supplierFolder" | "knowledgeFolder" | "formalKnowledgeFolder"): void {
     new Setting(container)
       .setName(label)
       .setDesc("相对于 Vault 根目录；保存时会规范化路径。")
@@ -236,5 +280,25 @@ export class QuietWorkbenchSettingTab extends PluginSettingTab {
           await this.host.saveSettings();
         })
       );
+  }
+
+  private async moveSidebarItem(layout: LayoutSchema, rows: LayoutItem[], position: number, offset: -1 | 1): Promise<void> {
+    const target = position + offset;
+    if (target < 0 || target >= rows.length) return;
+    [rows[position], rows[target]] = [rows[target], rows[position]];
+    rows.forEach((item, index) => { item.y = index; });
+    layout.items = rows;
+    await this.saveSidebarLayout(layout);
+    this.display();
+  }
+
+  private async saveSidebarLayout(layout: LayoutSchema): Promise<void> {
+    const result = validateLayout(layout, createBuiltinWidgetRegistry());
+    if (!result.valid) throw new Error(result.issues.map((issue) => `${issue.path}: ${issue.message}`).join("；"));
+    const index = this.host.settings.layouts.findIndex((entry) => entry.id === layout.id && entry.surface === "sidebar");
+    if (index >= 0) this.host.settings.layouts[index] = result.layout;
+    else this.host.settings.layouts.push(result.layout);
+    await this.host.saveSettings();
+    await this.host.refreshWorkbench();
   }
 }

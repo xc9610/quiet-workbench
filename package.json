@@ -1,6 +1,6 @@
 {
   "name": "quiet-workbench",
-  "version": "0.5.9",
+  "version": "0.6.0",
   "private": true,
   "description": "A local-first project, task, meeting and knowledge workbench for Obsidian.",
   "type": "module",
@@ -15,7 +15,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint src tests --max-warnings=0",
-    "verify": "pnpm run check && pnpm run test && pnpm run lint && pnpm run build"
+    "verify": "pnpm run check && pnpm run test && pnpm run lint && pnpm run build",
+    "release:check": "node scripts/release-check.mjs",
+    "release:verify": "pnpm run verify && pnpm run release:check"
   },
   "devDependencies": {
     "@eslint/js": "latest",

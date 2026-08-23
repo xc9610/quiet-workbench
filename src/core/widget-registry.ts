@@ -125,7 +125,7 @@ function validateCollectionConfig(config: Readonly<Record<string, unknown>>): Wi
   if (config.scopeMode !== undefined && (typeof config.scopeMode !== "string" || !["all", "fixed", "shared", "context"].includes(config.scopeMode))) {
     issues.push({ path: "scopeMode", message: "Unsupported data scope" });
   }
-  for (const key of ["projectPath", "clientPath", "projectType", "status", "search"] as const) {
+  for (const key of ["projectPath", "clientPath", "meetingPath", "supplierPath", "projectType", "status", "search"] as const) {
     if (config[key] !== undefined && typeof config[key] !== "string") {
       issues.push({ path: key, message: `${key} must be a string` });
     }
@@ -151,7 +151,7 @@ function validateGenericConfig(config: Readonly<Record<string, unknown>>): Widge
     issues.push({ path: "source", message: "source must be an object" });
   } else {
     const value = source as Record<string, unknown>;
-    if (!["tasks", "projects", "clients", "meetings", "knowledge", "mixed"].includes(String(value.kind))) {
+    if (!["tasks", "projects", "clients", "suppliers", "meetings", "knowledge", "mixed"].includes(String(value.kind))) {
       issues.push({ path: "source.kind", message: "Unsupported data source" });
     }
     if (!["all", "fixed", "shared", "context"].includes(String(value.scopeMode))) {

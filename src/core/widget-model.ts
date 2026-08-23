@@ -13,7 +13,7 @@ export type WidgetTypeId =
   | "control.actions"
   | "capture.memo";
 
-export type WidgetDataSource = "tasks" | "projects" | "clients" | "meetings" | "knowledge" | "mixed";
+export type WidgetDataSource = "tasks" | "projects" | "clients" | "suppliers" | "meetings" | "knowledge" | "mixed";
 export type WidgetScopeMode = "all" | "fixed" | "shared" | "context";
 
 export interface WidgetInstanceConfig {
@@ -22,6 +22,8 @@ export interface WidgetInstanceConfig {
     scopeMode: WidgetScopeMode;
     projectPath?: string;
     clientPath?: string;
+    meetingPath?: string;
+    supplierPath?: string;
     projectType?: string;
     taskScopes?: TaskScope[];
   };
@@ -94,7 +96,30 @@ export const WIDGET_PRESETS: ReadonlyArray<Readonly<WidgetPresetDefinition>> = O
   { id: "projects.summary", title: "项目摘要", description: "一个项目的核心信息", typeId: "view.detail", config: config("projects", { source: { kind: "projects", scopeMode: "shared" } }) },
   { id: "projects.relations", title: "项目关系", description: "客户、会议和知识关联", typeId: "view.relations", config: config("projects", { source: { kind: "projects", scopeMode: "shared" } }) },
   { id: "projects.selector", title: "项目选择器", description: "搜索并发布共享项目", typeId: "control.selector", config: config("projects") },
-  { id: "projects.actions-control", title: "项目快捷操作", description: "项目、任务、会议和 YOLO 操作", typeId: "control.actions", config: config("projects", { source: { kind: "projects", scopeMode: "shared" }, actions: ["create-project", "create-task", "create-meeting", "open", "yolo"] }) }
+  { id: "projects.actions-control", title: "项目快捷操作", description: "项目、任务、会议和 YOLO 操作", typeId: "control.actions", config: config("projects", { source: { kind: "projects", scopeMode: "shared" }, actions: ["create-project", "create-task", "create-meeting", "open", "yolo"] }) },
+  { id: "clients.list", title: "客户列表", description: "搜索并筛选全部客户", typeId: "view.list", config: config("clients") },
+  { id: "clients.followups", title: "待跟进客户", description: "按跟进日期显示逾期和近期客户", typeId: "view.list", config: config("clients", { query: { mode: "followups" } }) },
+  { id: "clients.status-board", title: "客户关系看板", description: "按关系状态分列客户", typeId: "view.board", config: config("clients", { query: { groupBy: "relationship-status" } }) },
+  { id: "clients.detail", title: "客户详情", description: "共享客户的核心信息", typeId: "view.detail", config: config("clients", { source: { kind: "clients", scopeMode: "shared" } }) },
+  { id: "clients.projects", title: "客户项目", description: "共享客户关联的开放项目", typeId: "view.list", config: config("projects", { source: { kind: "projects", scopeMode: "shared" }, query: { mode: "client-projects" } }) },
+  { id: "clients.actions", title: "客户行动", description: "共享客户及其项目的未完成行动", typeId: "view.list", config: config("tasks", { source: { kind: "tasks", scopeMode: "shared", taskScopes: ["project", "client"] }, query: { mode: "client-actions" } }) },
+  { id: "clients.meetings", title: "客户会议", description: "共享客户及其项目的相关会议", typeId: "view.list", config: config("meetings", { source: { kind: "meetings", scopeMode: "shared" }, query: { mode: "client-meetings" } }) },
+  { id: "clients.relations", title: "客户关系", description: "客户、项目、会议和行动关系", typeId: "view.relations", config: config("clients", { source: { kind: "clients", scopeMode: "shared" } }) },
+  { id: "clients.selector", title: "客户选择器", description: "搜索并发布共享客户", typeId: "control.selector", config: config("clients") },
+  { id: "clients.actions-control", title: "客户快捷操作", description: "创建客户、项目、会议和打开 YOLO", typeId: "control.actions", config: config("clients", { source: { kind: "clients", scopeMode: "shared" }, actions: ["create-client", "create-project", "create-meeting", "open", "yolo"] }) },
+  { id: "meetings.list", title: "会议列表", description: "搜索并浏览全部会议", typeId: "view.list", config: config("meetings", { query: { mode: "all" } }) },
+  { id: "meetings.upcoming", title: "近期会议", description: "按会议日期查看近期记录", typeId: "view.calendar", config: config("meetings", { query: { mode: "upcoming" } }) },
+  { id: "meetings.actions", title: "会议行动项", description: "查看和批量迁移会议草稿行动", typeId: "view.list", config: config("tasks", { source: { kind: "tasks", scopeMode: "all", taskScopes: ["meeting-draft"] }, query: { mode: "meeting-actions" }, actions: ["migrate"] }) },
+  { id: "meetings.detail", title: "会议详情", description: "共享会议的核心信息", typeId: "view.detail", config: config("meetings", { source: { kind: "meetings", scopeMode: "shared" } }) },
+  { id: "meetings.relations", title: "会议关系", description: "会议关联项目、客户和行动项", typeId: "view.relations", config: config("meetings", { source: { kind: "meetings", scopeMode: "shared" } }) },
+  { id: "meetings.selector", title: "会议选择器", description: "搜索并发布共享会议", typeId: "control.selector", config: config("meetings") },
+  { id: "meetings.actions-control", title: "会议快捷操作", description: "创建、打开会议并迁移行动", typeId: "control.actions", config: config("meetings", { source: { kind: "meetings", scopeMode: "shared" }, actions: ["create-meeting", "open", "migrate", "yolo"] }) },
+  { id: "suppliers.list", title: "供应商列表", description: "搜索并浏览全部供应商", typeId: "view.list", config: config("suppliers") },
+  { id: "suppliers.status-board", title: "供应商状态看板", description: "按状态分列供应商", typeId: "view.board", config: config("suppliers", { query: { groupBy: "status" } }) },
+  { id: "suppliers.detail", title: "供应商详情", description: "共享供应商的核心信息", typeId: "view.detail", config: config("suppliers", { source: { kind: "suppliers", scopeMode: "shared" } }) },
+  { id: "suppliers.relations", title: "供应商关系", description: "供应商相关项目、会议和引用", typeId: "view.relations", config: config("suppliers", { source: { kind: "suppliers", scopeMode: "shared" } }) },
+  { id: "suppliers.selector", title: "供应商选择器", description: "搜索并发布共享供应商", typeId: "control.selector", config: config("suppliers") },
+  { id: "suppliers.actions-control", title: "供应商快捷操作", description: "创建、打开供应商和启动 YOLO", typeId: "control.actions", config: config("suppliers", { source: { kind: "suppliers", scopeMode: "shared" }, actions: ["create-supplier", "open", "yolo"] }) }
 ]);
 
 export function getWidgetPreset(id?: string): WidgetPresetDefinition | undefined {
@@ -150,7 +175,10 @@ const LEGACY_PRESETS: Record<string, string> = {
   "projects.risks": "projects.risks",
   "projects.activity": "projects.activity",
   "projects.relations": "projects.relations",
-  "projects.quick-actions": "projects.actions-control"
+  "projects.quick-actions": "projects.actions-control",
+  "clients.list": "clients.list",
+  "meetings.actions": "meetings.actions",
+  "suppliers.list": "suppliers.list"
 };
 
 export function migrateLegacyWidgetItem(item: LayoutItem, index: number): LayoutItem {

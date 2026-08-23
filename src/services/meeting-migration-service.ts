@@ -21,6 +21,53 @@ export interface MeetingMigrationResult {
   existingTargetPath?: string;
 }
 
+export type MeetingMigrationBatchItemOutcome =
+  | MeetingMigrationResult["outcome"]
+  | "conflict"
+  | "error"
+  | "skipped";
+
+export interface MeetingMigrationBatchInput {
+  items: MeetingMigrationInput[];
+  /** Stop after the first failure. Remaining items are returned as retryable skipped items. */
+  stopOnFailure?: boolean;
+  /** Stable caller-provided identifier that can be persisted with a workflow receipt. */
+  batchId?: string;
+}
+
+export interface MeetingMigrationBatchItemResult {
+  index: number;
+  sourcePath: string;
+  sourceTaskId: string;
+  targetPath: string;
+  outcome: MeetingMigrationBatchItemOutcome;
+  retryable: boolean;
+  message?: string;
+  targetBlockId?: string;
+  transactionId?: string;
+  receipt?: DetailedTransactionReceipt;
+  unresolvedPaths: string[];
+}
+
+export interface MeetingMigrationBatchResult {
+  id: string;
+  status: "completed" | "partial" | "failed";
+  items: MeetingMigrationBatchItemResult[];
+  migratedCount: number;
+  alreadyMigratedCount: number;
+  failedCount: number;
+  skippedCount: number;
+  /** Paths that compensation could not restore and may require manual inspection. */
+  manualRepairPaths: string[];
+  /** Self-contained inputs for retrying only failed or skipped work. */
+  retryItems: MeetingMigrationInput[];
+}
+
+export interface MeetingMigrationRetryOptions {
+  stopOnFailure?: boolean;
+  batchId?: string;
+}
+
 const MIGRATION_PATTERN = /<!--\s*quiet-workbench:migrated\s+target="([^"]+)"\s+block="([^"]+)"\s+transaction="([^"]+)"\s*-->/u;
 
 export class MeetingMigrationService {
@@ -106,4 +153,167 @@ export class MeetingMigrationService {
       receipt
     };
   }
+
+  /**
+   * Runs independent two-file migrations in a deterministic order. A batch is not
+   * presented as one ACID transaction: every item keeps its own transaction receipt.
+   */
+  async migrateBatch(input: MeetingMigrationBatchInput): Promise<MeetingMigrationBatchResult> {
+    if (input.items.length === 0) throw new Error("Meeting migration batch cannot be empty.");
+    const id = input.batchId ?? makeTransactionId();
+    const results: MeetingMigrationBatchItemResult[] = [];
+    const retryItems: MeetingMigrationInput[] = [];
+    let stopped = false;
+
+    for (const [index, item] of input.items.entries()) {
+      if (stopped) {
+        results.push(batchItemResult(index, item, "skipped", {
+          retryable: true,
+          message: "Skipped after an earlier batch item failed."
+        }));
+        retryItems.push(item);
+        continue;
+      }
+      try {
+        const result = await this.migrate(item);
+        const failed = result.outcome === "failed";
+        results.push(batchItemResult(index, item, result.outcome, {
+          retryable: failed,
+          targetBlockId: result.targetBlockId,
+          transactionId: result.transactionId,
+          receipt: result.receipt,
+          message: failed ? migrationFailureMessage(result.receipt) : undefined
+        }));
+        if (failed) {
+          retryItems.push(item);
+          stopped = input.stopOnFailure === true;
+        }
+      } catch (error) {
+        const outcome = error instanceof RevisionConflictError ? "conflict" : "error";
+        results.push(batchItemResult(index, item, outcome, {
+          retryable: true,
+          message: errorMessage(error)
+        }));
+        retryItems.push(item);
+        stopped = input.stopOnFailure === true;
+      }
+    }
+
+    return summarizeBatch(id, results, retryItems);
+  }
+
+  /**
+   * Re-resolves retryable actions from their Markdown source before retrying. Stable
+   * block IDs are preferred; block-less tasks are accepted only if line and text still
+   * match, so an unrelated external edit cannot silently redirect a migration.
+   */
+  async retryBatch(
+    previous: MeetingMigrationBatchResult,
+    options: MeetingMigrationRetryOptions = {}
+  ): Promise<MeetingMigrationBatchResult> {
+    if (previous.retryItems.length === 0) throw new Error("Meeting migration batch has no retryable items.");
+    const refreshed: MeetingMigrationInput[] = [];
+    const unresolved: Array<{ input: MeetingMigrationInput; message: string }> = [];
+    for (const input of previous.retryItems) {
+      try {
+        refreshed.push({ ...input, sourceTask: await this.resolveRetryTask(input.sourceTask) });
+      } catch (error) {
+        unresolved.push({ input, message: errorMessage(error) });
+      }
+    }
+
+    const retried = refreshed.length > 0
+      ? await this.migrateBatch({
+          items: refreshed,
+          stopOnFailure: options.stopOnFailure,
+          batchId: options.batchId ?? `${previous.id}-retry`
+        })
+      : emptyFailedBatch(options.batchId ?? `${previous.id}-retry`);
+    if (unresolved.length === 0) return retried;
+
+    const offset = retried.items.length;
+    const unresolvedResults = unresolved.map(({ input, message }, index) =>
+      batchItemResult(offset + index, input, "error", { retryable: true, message })
+    );
+    return summarizeBatch(
+      retried.id,
+      [...retried.items, ...unresolvedResults],
+      [...retried.retryItems, ...unresolved.map(({ input }) => input)]
+    );
+  }
+
+  private async resolveRetryTask(task: TaskRecord): Promise<TaskRecord> {
+    const content = await this.vault.read(task.path);
+    const parsed = parseMarkdown(content, {
+      path: task.path,
+      sourceName: task.sourceName,
+      scope: "meeting-draft"
+    });
+    const current = locateTask(parsed.tasks, task);
+    if (!current) throw new Error(`Meeting action is no longer present in ${task.path}.`);
+    if (!task.blockId && current.text !== task.text) {
+      throw new Error(`Block-less meeting action changed at ${task.path}:${task.line}; retry requires manual confirmation.`);
+    }
+    return current;
+  }
+}
+
+function batchItemResult(
+  index: number,
+  input: MeetingMigrationInput,
+  outcome: MeetingMigrationBatchItemOutcome,
+  detail: Partial<Omit<MeetingMigrationBatchItemResult, "index" | "sourcePath" | "sourceTaskId" | "targetPath" | "outcome" | "unresolvedPaths">> = {}
+): MeetingMigrationBatchItemResult {
+  return {
+    index,
+    sourcePath: input.sourceTask.path,
+    sourceTaskId: input.sourceTask.id,
+    targetPath: input.targetPath,
+    outcome,
+    retryable: detail.retryable ?? false,
+    message: detail.message,
+    targetBlockId: detail.targetBlockId,
+    transactionId: detail.transactionId,
+    receipt: detail.receipt,
+    unresolvedPaths: detail.receipt?.unresolvedPaths ?? []
+  };
+}
+
+function summarizeBatch(
+  id: string,
+  items: MeetingMigrationBatchItemResult[],
+  retryItems: MeetingMigrationInput[]
+): MeetingMigrationBatchResult {
+  const migratedCount = items.filter((item) => item.outcome === "migrated").length;
+  const alreadyMigratedCount = items.filter((item) => item.outcome === "already-migrated").length;
+  const failedCount = items.filter((item) => ["failed", "conflict", "error"].includes(item.outcome)).length;
+  const skippedCount = items.filter((item) => item.outcome === "skipped").length;
+  const successfulCount = migratedCount + alreadyMigratedCount;
+  return {
+    id,
+    status: failedCount + skippedCount === 0 ? "completed" : successfulCount > 0 ? "partial" : "failed",
+    items,
+    migratedCount,
+    alreadyMigratedCount,
+    failedCount,
+    skippedCount,
+    manualRepairPaths: [...new Set(items.flatMap((item) => item.unresolvedPaths))],
+    retryItems
+  };
+}
+
+function emptyFailedBatch(id: string): MeetingMigrationBatchResult {
+  return summarizeBatch(id, [], []);
+}
+
+function migrationFailureMessage(receipt?: DetailedTransactionReceipt): string {
+  if (!receipt) return "Migration failed without a transaction receipt.";
+  const unresolved = receipt.unresolvedPaths.length > 0
+    ? ` Unresolved paths: ${receipt.unresolvedPaths.join(", ")}.`
+    : "";
+  return `${receipt.status}: ${receipt.messages.join(" ")}${unresolved}`.trim();
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

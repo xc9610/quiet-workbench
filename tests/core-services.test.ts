@@ -277,6 +277,63 @@ describe("WriteTransactionExecutor", () => {
     expect(await vault.read("a.md")).toBe("before");
   });
 
+  it("blocks a stale synchronized write during preflight", async () => {
+    const vault = new MemoryVault();
+    vault.seed("a.md", "before");
+    const executor = new WriteTransactionExecutor(vault);
+    const staleRevision = contentRevision("before");
+    vault.seed("a.md", "changed on another device");
+
+    const receipt = await executor.execute({
+      label: "stale sync write",
+      operations: [{ kind: "write", path: "a.md", content: "local update", expectedRevision: staleRevision }]
+    });
+
+    expect(receipt.status).toBe("failed");
+    expect(receipt.messages.join(" ")).toContain("Revision conflict");
+    expect(await vault.read("a.md")).toBe("changed on another device");
+  });
+
+  it("refuses undo after a synchronized external edit", async () => {
+    const vault = new MemoryVault();
+    vault.seed("a.md", "before");
+    const journal = new TransactionJournal();
+    const executor = new WriteTransactionExecutor(vault, journal, { idFactory: () => "sync-tx" });
+    const committed = await executor.execute({
+      label: "local update",
+      operations: [{ kind: "write", path: "a.md", content: "local" }]
+    });
+    expect(committed.status).toBe("committed");
+
+    vault.seed("a.md", "changed on another device");
+    const undo = await executor.undo(committed.id);
+
+    expect(undo.status).toBe("failed");
+    expect(undo.messages.join(" ")).toContain("changed after the transaction");
+    expect(await vault.read("a.md")).toBe("changed on another device");
+  });
+
+  it("hydrates the transaction journal for restart recovery and preserves the newest entries", async () => {
+    const vault = new MemoryVault();
+    vault.seed("a.md", "before");
+    const original = new TransactionJournal(2);
+    const executor = new WriteTransactionExecutor(vault, original, {
+      idFactory: (() => {
+        let index = 0;
+        return () => `journal-${++index}`;
+      })()
+    });
+    await executor.execute({ label: "one", operations: [{ kind: "write", path: "a.md", content: "one" }] });
+    await executor.execute({ label: "two", operations: [{ kind: "write", path: "a.md", content: "two" }] });
+    await executor.execute({ label: "three", operations: [{ kind: "write", path: "a.md", content: "three" }] });
+
+    const restored = new TransactionJournal(2);
+    restored.hydrate(original.serialize());
+    expect(restored.list().map((receipt) => receipt.id)).toEqual(["journal-3", "journal-2"]);
+    expect(restored.latestCommitted()?.receipt.label).toBe("three");
+    expect(restored.get("journal-1")).toBeUndefined();
+  });
+
   it("reports partial when compensation would overwrite an external edit", async () => {
     const vault = new MemoryVault();
     vault.seed("a.md", "A0");

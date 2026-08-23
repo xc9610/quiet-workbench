@@ -267,4 +267,59 @@ describe("layout validation and management", () => {
     const managerFocusKey = manager.get("today")!.items[0].instanceId!;
     expect(manager.updateItem("today", managerFocusKey, { hidden: true }).items[0].hidden).toBe(true);
   });
+
+  it("keeps mobile ordering isolated from desktop coordinates and widget config", () => {
+    const layout = getDefaultLayouts().find((item) => item.id === "today")!;
+    const focusKey = layout.items[0].instanceId!;
+    layout.items[0].config = { quick: "today", scopes: ["project"] };
+    layout.items[0].collapsed = true;
+    layout.items[0].hidden = true;
+    const mobile = reorderMobileLayout(layout, [
+      ...layout.items.map((item) => item.instanceId ?? item.widgetId).slice(1),
+      focusKey
+    ]);
+
+    expect(mobile.items.at(-1)).toMatchObject({
+      instanceId: focusKey,
+      x: 0,
+      width: 1,
+      collapsed: true,
+      hidden: true,
+      config: { quick: "today", scopes: ["project"] }
+    });
+    expect(layout.items[0]).toMatchObject({ x: 0, width: 8, y: 0 });
+    expect(layout.items[0].config).toEqual({ quick: "today", scopes: ["project"] });
+    expect(mobile.items.at(-1)?.config).not.toBe(layout.items[0].config);
+  });
+
+  it("rejects a damaged persisted layout without mutating the manager", () => {
+    const manager = new LayoutManager(registry);
+    const before = manager.get("today")!;
+    const damaged = structuredClone(before);
+    damaged.items[0].x = 12;
+    damaged.items[0].width = 2;
+    damaged.items[1].widgetId = "missing.widget";
+
+    expect(() => manager.import(damaged)).toThrow(/items\[0\]|items\[1\]/);
+    expect(manager.get("today")).toEqual(before);
+    expect(validateLayout(damaged, registry).valid).toBe(false);
+  });
+
+  it("orders mobile cards deterministically when desktop items share a position", () => {
+    const layout = getDefaultLayouts().find((item) => item.id === "today")!;
+    layout.items = layout.items.map((item) => ({ ...item, x: 0, y: 0 }));
+    const ids = layout.items.map((item) => item.instanceId ?? item.widgetId);
+    const first = adaptLayoutForDevice(layout, "mobile");
+    const second = adaptLayoutForDevice(layout, "mobile");
+
+    expect(first.items.map((item) => item.instanceId ?? item.widgetId)).toEqual(ids);
+    expect(second).toEqual(first);
+    const expectedY: number[] = [];
+    let nextY = 0;
+    for (const item of layout.items) {
+      expectedY.push(nextY);
+      nextY += item.collapsed ? 1 : Math.max(1, item.height);
+    }
+    expect(first.items.map((item) => item.y)).toEqual(expectedY);
+  });
 });

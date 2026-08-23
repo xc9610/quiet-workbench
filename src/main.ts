@@ -12,6 +12,7 @@ import { createBuiltinWidgetRegistry } from "./core/widget-registry";
 import { getDefaultLayouts, upgradePersistedLayouts, validateLayout } from "./core/layout";
 import {
   EntityIndex,
+  KnowledgePublicationPlanner,
   MeetingMigrationService,
   ObsidianVaultAdapter,
   ProjectTaskService,
@@ -21,6 +22,9 @@ import {
   contentRevision,
   normalizeVaultPath,
   type DetailedTransactionReceipt,
+  type KnowledgePublicationInput,
+  type KnowledgePublicationPreview,
+  type MeetingMigrationBatchResult,
   type VaultPort
 } from "./services";
 import { DEFAULT_SETTINGS, type QuietWorkbenchSettings } from "./settings";
@@ -84,6 +88,7 @@ class PluginWorkbenchController implements WorkbenchController {
   private readonly transactions: WriteTransactionExecutor;
   private readonly tasks: ProjectTaskService;
   private readonly meetingMigrations: MeetingMigrationService;
+  private readonly knowledgePublications: KnowledgePublicationPlanner;
   private readonly templates = new TemplateService();
   private readonly diagnostics: DiagnosticService;
   private index: EntityIndex;
@@ -106,6 +111,7 @@ class PluginWorkbenchController implements WorkbenchController {
     });
     this.tasks = new ProjectTaskService(this.vaultPort, this.transactions);
     this.meetingMigrations = new MeetingMigrationService(this.vaultPort, this.transactions);
+    this.knowledgePublications = new KnowledgePublicationPlanner(this.vaultPort);
     this.diagnostics = new DiagnosticService(new ObsidianDiagnosticReader(this.vaultPort));
     this.index = this.createIndex();
     this.indexSignature = this.makeIndexSignature();
@@ -249,32 +255,22 @@ class PluginWorkbenchController implements WorkbenchController {
     return result.receipt;
   }
 
-  async migrateMeetingTasks(tasks: TaskRecord[], targetPath: string): Promise<TransactionReceipt[]> {
+  async migrateMeetingTasks(tasks: TaskRecord[], targetPath: string) {
     this.requireWrites();
-    const receipts: TransactionReceipt[] = [];
-    let processed = 0;
-    let failure: string | undefined;
-    try {
-      for (const task of tasks) {
-        const result = await this.meetingMigrations.migrate({ sourceTask: task, targetPath, targetScope: this.migrationTargetScope(targetPath) });
-        if (result.receipt) receipts.push(result.receipt);
-        if (result.outcome === "migrated" || result.outcome === "already-migrated") processed += 1;
-        if (result.receipt?.status !== "committed" && result.outcome !== "already-migrated") {
-          const unresolved = result.receipt?.unresolvedPaths.length ? `；未恢复：${result.receipt.unresolvedPaths.join("、")}` : "";
-          failure = `第 ${processed + 1} 条迁移失败（${result.receipt?.status ?? result.outcome}）${unresolved}`;
-          break;
-        }
-      }
-    } catch (error) {
-      failure = `第 ${processed + 1} 条迁移发生冲突：${errorMessage(error)}`;
-    } finally {
-      for (const task of tasks) await this.index.refreshPath(task.path);
-      await this.index.refreshPath(targetPath);
-      await this.persistJournal();
-      await this.refresh();
-    }
-    if (failure) throw new Error(`已完成 ${processed}/${tasks.length} 条。${failure}`);
-    return receipts;
+    const targetScope = this.migrationTargetScope(targetPath);
+    const result = await this.meetingMigrations.migrateBatch({
+      items: tasks.map((sourceTask) => ({ sourceTask, targetPath, targetScope })),
+      stopOnFailure: true
+    });
+    await this.refreshMeetingBatchPaths(result);
+    return result;
+  }
+
+  async retryMeetingMigration(batch: MeetingMigrationBatchResult) {
+    this.requireWrites();
+    const result = await this.meetingMigrations.retryBatch(batch, { stopOnFailure: true });
+    await this.refreshMeetingBatchPaths(result);
+    return result;
   }
 
   async updateKnowledge(path: string, status: string, projectPath?: string): Promise<TransactionReceipt> {
@@ -290,6 +286,17 @@ class PluginWorkbenchController implements WorkbenchController {
       operations: [{ kind: "write", path, content: after, expectedRevision: contentRevision(before) }]
     });
     await this.afterReceipt(receipt, path);
+    return receipt;
+  }
+
+  async previewKnowledgePublication(input: KnowledgePublicationInput): Promise<KnowledgePublicationPreview> {
+    return this.knowledgePublications.preview(input);
+  }
+
+  async publishKnowledge(preview: KnowledgePublicationPreview): Promise<TransactionReceipt> {
+    this.requireWrites();
+    const receipt = await this.transactions.execute(preview.plan);
+    await this.afterReceipt(receipt, preview.sourcePath);
     return receipt;
   }
 
@@ -488,9 +495,17 @@ class PluginWorkbenchController implements WorkbenchController {
     throw new Error("会议行动项只能迁移到已索引的项目或客户笔记。");
   }
 
+  private async refreshMeetingBatchPaths(result: MeetingMigrationBatchResult): Promise<void> {
+    for (const path of new Set(result.items.flatMap((item) => [item.sourcePath, item.targetPath]))) {
+      await this.index.refreshPath(path);
+    }
+    await this.persistJournal();
+    await this.refresh();
+  }
+
   private isConfiguredTemplatePath(path: string): boolean {
     const normalized = comparableVaultPath(path);
-    return Object.values(this.plugin.settings.templates).some((templatePath) => {
+    return [...Object.values(this.plugin.settings.templates), this.plugin.settings.knowledgeTemplate].some((templatePath) => {
       if (!templatePath.trim()) return false;
       try {
         return comparableVaultPath(templatePath) === normalized;
@@ -719,6 +734,10 @@ function entitySummary(entity: EntityRecord): EntitySummary {
     projectType: fieldString(entity.fields, ["project_type"]),
     client: fieldString(entity.fields, ["client", "customer", "organization"]),
     project: fieldString(entity.fields, ["project", "projects"]),
+    organizationType: fieldString(entity.fields, ["organization_type", "company_type"]),
+    businessDomains: fieldString(entity.fields, ["business_domains", "business_type"]),
+    relationshipStatus: fieldString(entity.fields, ["relationship_status", "stage", "status"]),
+    followupDate: fieldString(entity.fields, ["followup_date", "next_followup"]),
     updatedAt: entity.mtime
   };
 }

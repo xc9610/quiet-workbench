@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { TaskRecord } from "../src/core/types";
 import {
   calculateProjectHealth,
+  clientFollowupBucket,
   dateAfter,
   isRecurringTask,
   isWaitingTask,
@@ -72,7 +73,31 @@ describe("independent widget data derivation", () => {
     );
     expect(health.level).toBe("risk");
     expect(health.progress).toBe(50);
+    expect(health.dueSoon).toBe(0);
+    expect(health.unscheduled).toBe(0);
     expect(health.reasons).toEqual(expect.arrayContaining(["1 项任务逾期", "项目目标日期已过", "超过 14 天没有更新"]));
     expect(dateAfter("2026-08-12", 7)).toBe("2026-08-19");
+  });
+
+  it("counts near-term and unscheduled work and flags large backlogs", () => {
+    const tasks = [
+      task({ id: "today", due: "2026-08-12" }),
+      task({ id: "scheduled", scheduled: "2026-08-15" }),
+      ...Array.from({ length: 8 }, (_, index) => task({ id: `open-${index}` }))
+    ];
+    const health = calculateProjectHealth({ detail: "完成接口联调" }, tasks, "2026-08-12");
+    expect(health.dueSoon).toBe(2);
+    expect(health.unscheduled).toBe(8);
+    expect(health.open).toBe(10);
+    expect(health.reasons).toContain("10 项待处理任务积压");
+    expect(health.level).toBe("attention");
+  });
+
+  it("groups client follow-up dates without writing client files", () => {
+    expect(clientFollowupBucket(undefined, "2026-08-23", "2026-08-30")).toBe("unscheduled");
+    expect(clientFollowupBucket("2026-08-22", "2026-08-23", "2026-08-30")).toBe("overdue");
+    expect(clientFollowupBucket("2026-08-23", "2026-08-23", "2026-08-30")).toBe("today");
+    expect(clientFollowupBucket("2026-08-29", "2026-08-23", "2026-08-30")).toBe("week");
+    expect(clientFollowupBucket("2026-09-01", "2026-08-23", "2026-08-30")).toBe("later");
   });
 });

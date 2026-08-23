@@ -312,7 +312,7 @@
 <div class="qwb-task-board">
   <header class="qwb-task-board-header">
     <div>
-      <span class="qwb-task-board-eyebrow">TASK BOARD · 0.5.9</span>
+      <span class="qwb-task-board-eyebrow">TASK BOARD · 0.6.0</span>
       <h1>任务看板</h1>
       <p>统一查看项目任务、客户行动和待迁移会议草稿。</p>
     </div>
