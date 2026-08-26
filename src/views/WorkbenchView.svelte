@@ -49,7 +49,7 @@
   type SceneId = string;
   type DialogKind = "entity" | "task" | "task-edit" | "migrate" | "knowledge" | "yolo-preview" | null;
   type MoveMode = "move" | "resize";
-  const UI_VERSION = "0.6.0";
+  const UI_VERSION = "0.6.1";
 
   interface SceneDefinition {
     id: SceneId;
@@ -57,11 +57,6 @@
     description: string;
     icon: string;
     items: LayoutItem[];
-  }
-
-  interface SceneMetric {
-    label: string;
-    value: number;
   }
 
   interface EntityDraft {
@@ -114,7 +109,7 @@
   ];
 
   let snapshot: WorkbenchSnapshot = controller.getSnapshot() ?? EMPTY_SNAPSHOT;
-  let activeScene: SceneId = (controller.settings.activeWorkbenchLayout as SceneId) || "today";
+  let activeScene: SceneId = (controller.settings.activeWorkbenchLayout as SceneId) || "workbench";
   let items: LayoutItem[] = loadScene(activeScene);
   let busy = false;
   let message = "";
@@ -477,24 +472,6 @@
     await navigator.clipboard.writeText(yoloPrompt);
     await controller.openYolo(yoloPath || undefined);
     dialog = null;
-  }
-
-  function workbenchLayouts() {
-    return controller.settings.layouts.filter((layout) => layout.surface === "workbench");
-  }
-
-  function sceneTitle(sceneId: string): string {
-    return workbenchLayouts().find((layout) => layout.id === sceneId)?.name
-      ?? sceneDefinitions.find((scene) => scene.id === sceneId)?.name
-      ?? sceneId;
-  }
-
-  function sceneDescription(sceneId: string): string {
-    return sceneDefinitions.find((scene) => scene.id === sceneId)?.description ?? "自定义工作台布局";
-  }
-
-  function sceneIcon(sceneId: string): string {
-    return sceneDefinitions.find((scene) => scene.id === sceneId)?.icon ?? "▦";
   }
 
   function widgetLibraryItems() {
@@ -971,29 +948,6 @@
     return [...groups.entries()];
   }
 
-  function sceneMetrics(sceneId: string): SceneMetric[] {
-    const today = formatDate(new Date(), "YYYY-MM-DD");
-    if (sceneId === "projects") {
-      return [
-        { label: "开放项目", value: snapshot.projects.length },
-        { label: "有截止日期", value: snapshot.projects.filter((project) => project.due).length },
-        { label: "会议草稿", value: snapshot.tasks.filter((task) => task.scope === "meeting-draft" && !task.completed).length }
-      ];
-    }
-    if (sceneId === "knowledge") {
-      return [
-        { label: "待处理", value: snapshot.knowledge.filter((entry) => !entry.status || entry.status === "待处理").length },
-        { label: "待沉淀/待读", value: snapshot.knowledge.filter((entry) => entry.status === "待沉淀" || entry.status === "待读").length },
-        { label: "已关联项目", value: snapshot.knowledge.filter((entry) => entry.related).length }
-      ];
-    }
-    return [
-      { label: "逾期", value: snapshot.tasks.filter((task) => !task.completed && task.due && task.due < today).length },
-      { label: "今天到期", value: snapshot.tasks.filter((task) => !task.completed && task.due === today).length },
-      { label: "未来 7 天", value: calendarTasks().length }
-    ];
-  }
-
   function knowledgeHint(widgetId: string): string {
     return {
       "knowledge.inbox": "尚未分流的收件箱内容",
@@ -1015,16 +969,6 @@
       meeting: controller.settings.meetingFolder,
       supplier: controller.settings.supplierFolder
     }[entityKind];
-  }
-
-  async function selectScene(sceneId: SceneId): Promise<void> {
-    layoutEditMode = false;
-    closeFocusFilters();
-    activeScene = sceneId;
-    items = loadScene(sceneId);
-    hydrateFocusFilters();
-    layoutUndo = [];
-    await controller.activateLayout(sceneId);
   }
 
   function enabled(item: LayoutItem): boolean {
@@ -1206,20 +1150,6 @@
     await controller.saveLayout(activeScene, items);
   }
 
-  async function copyLayout(): Promise<void> {
-    const name = window.prompt("新布局名称", `${sceneTitle(activeScene)} 副本`);
-    if (!name) return;
-    activeScene = await controller.copyLayout(activeScene, name);
-    items = loadScene(activeScene);
-  }
-
-  async function renameLayout(): Promise<void> {
-    const name = window.prompt("布局名称", sceneTitle(activeScene));
-    if (!name) return;
-    await controller.renameLayout(activeScene, name);
-    items = [...items];
-  }
-
   async function restoreLayout(): Promise<void> {
     await controller.restoreLayout(activeScene);
     items = loadScene(activeScene);
@@ -1229,13 +1159,6 @@
   async function exportLayout(): Promise<void> {
     await navigator.clipboard.writeText(controller.exportLayout(activeScene));
     message = "布局 JSON 已复制到剪贴板";
-  }
-
-  async function importLayout(): Promise<void> {
-    const payload = window.prompt("粘贴布局 JSON");
-    if (!payload) return;
-    activeScene = await controller.importLayout(payload);
-    items = loadScene(activeScene);
   }
 
   async function submitEntity(): Promise<void> {
@@ -1414,9 +1337,9 @@
 <div class:layout-editing={layoutEditMode} class="qwb-shell" data-scene={activeScene}>
   <header class="qwb-header">
     <div>
-      <div class="qwb-eyebrow">QUIET WORKBENCH · {UI_VERSION} · {activeScene.toUpperCase()}</div>
-      <h1>{sceneTitle(activeScene)}</h1>
-      <p>{sceneDescription(activeScene)}</p>
+      <div class="qwb-eyebrow">QUIET WORKBENCH · {UI_VERSION}</div>
+      <h1>工作台</h1>
+      <p>自由添加、组合和调整组件</p>
     </div>
     <div class="qwb-header-actions">
       <span class:enabled={controller.settings.writesEnabled} class="qwb-write-state">
@@ -1430,29 +1353,13 @@
     </div>
   </header>
 
-  <nav class="qwb-scenes" aria-label="工作台场景">
-    {#each workbenchLayouts() as scene}
-      <button class:active={activeScene === scene.id} on:click={() => selectScene(scene.id)}><i>{sceneIcon(scene.id)}</i><span>{scene.name}</span></button>
-    {/each}
-  </nav>
-
-  <section class="qwb-scene-summary" aria-label={`${sceneTitle(activeScene)}概览`}>
-    <div class="qwb-scene-mark" aria-hidden="true">{sceneIcon(activeScene)}</div>
-    {#each sceneMetrics(activeScene) as metric}
-      <div class="qwb-scene-metric"><strong>{metric.value}</strong><span>{metric.label}</span></div>
-    {/each}
-  </section>
-
   {#if layoutEditMode}
     <div class="qwb-layout-actions" aria-label="布局操作">
       <span>布局编辑中</span>
       <button class="qwb-add-widget" disabled={busy} on:click={() => { selectedWidgetType = ""; showWidgetLibrary = true; }}>＋ 添加组件</button>
       <button disabled={!layoutUndo.length || busy} on:click={() => run(undoLayout, "已撤销布局调整")}>撤销布局</button>
-      <button disabled={busy} on:click={() => run(copyLayout, "布局已复制")}>复制</button>
-      <button disabled={busy} on:click={() => run(renameLayout, "布局已重命名")}>重命名</button>
       <button disabled={busy} on:click={() => run(restoreLayout, "已恢复默认布局")}>恢复默认</button>
       <button disabled={busy} on:click={() => run(exportLayout, "布局已导出")}>导出</button>
-      <button disabled={busy} on:click={() => run(importLayout, "布局已导入")}>导入</button>
     </div>
   {/if}
 

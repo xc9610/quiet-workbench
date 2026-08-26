@@ -20,6 +20,18 @@ export function layoutItemKey(item: Pick<LayoutItem, "widgetId" | "instanceId">)
 const layouts: LayoutSchema[] = [
   {
     version: 1,
+    id: "workbench",
+    name: "工作台",
+    surface: "workbench",
+    items: [
+      { widgetId: "tasks.today", x: 0, y: 0, width: 8, height: 7 },
+      { widgetId: "capture.memo", x: 8, y: 0, width: 4, height: 3 },
+      { widgetId: "core.quick-create", x: 8, y: 3, width: 4, height: 2 },
+      { widgetId: "projects.recent", x: 8, y: 5, width: 4, height: 3 }
+    ]
+  },
+  {
+    version: 1,
     id: "today",
     name: "今日执行",
     surface: "workbench",
@@ -109,6 +121,18 @@ export function upgradePersistedLayouts(persisted: LayoutSchema[]): LayoutSchema
     upgraded.items.push({ widgetId: "tasks.upcoming", x: 0, y: 3, width: 1, height: 4 });
     return migrateLayoutWidgets(upgraded);
   });
+}
+
+/** Creates the single visible workbench from the user's last active layout without removing legacy layouts. */
+export function ensureSingleWorkbenchLayout(persisted: LayoutSchema[], activeId?: string): LayoutSchema[] {
+  const copies = persisted.map(cloneLayout);
+  if (copies.some((layout) => layout.surface === "workbench" && layout.id === "workbench")) return copies;
+  const source = copies.find((layout) => layout.surface === "workbench" && layout.id === activeId)
+    ?? copies.find((layout) => layout.surface === "workbench" && layout.id === "today")
+    ?? copies.find((layout) => layout.surface === "workbench")
+    ?? cloneLayout(layouts.find((layout) => layout.id === "workbench")!);
+  copies.push({ ...cloneLayout(source), id: "workbench", name: "工作台", surface: "workbench" });
+  return copies;
 }
 
 function migrateLayoutWidgets(layout: LayoutSchema): LayoutSchema {

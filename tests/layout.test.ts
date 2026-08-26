@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   adaptLayoutForDevice,
+  ensureSingleWorkbenchLayout,
   getDefaultLayouts,
   importLayout,
   LayoutManager,
@@ -17,9 +18,10 @@ import {
 describe("default layouts", () => {
   const registry = createBuiltinWidgetRegistry();
 
-  it("provides three workbench scenes and one sidebar layout", () => {
+  it("provides one primary workbench plus legacy-compatible layouts and one sidebar layout", () => {
     const defaults = getDefaultLayouts();
     expect(defaults.filter((layout) => layout.surface === "workbench").map((layout) => layout.id)).toEqual([
+      "workbench",
       "today",
       "projects",
       "knowledge"
@@ -35,8 +37,21 @@ describe("default layouts", () => {
     first[0].name = "Changed";
     first[0].items[0].x = 99;
     const second = getDefaultLayouts();
-    expect(second[0].name).toBe("今日执行");
+    expect(second[0].name).toBe("工作台");
     expect(second[0].items[0].x).toBe(0);
+  });
+
+  it("creates the single workbench from the last active customized layout without removing legacy backups", () => {
+    const legacy = getDefaultLayouts().filter((layout) => layout.id !== "workbench");
+    const projects = legacy.find((layout) => layout.id === "projects")!;
+    projects.items[0].width = 7;
+    const migrated = ensureSingleWorkbenchLayout(legacy, "projects");
+    const workbench = migrated.find((layout) => layout.id === "workbench")!;
+    expect(workbench.name).toBe("工作台");
+    expect(workbench.items).toEqual(projects.items);
+    expect(workbench.items).not.toBe(projects.items);
+    expect(migrated.some((layout) => layout.id === "projects")).toBe(true);
+    expect(ensureSingleWorkbenchLayout(migrated, "today")).toEqual(migrated);
   });
 
   it("adds upcoming tasks to old sidebar layouts without losing existing items", () => {

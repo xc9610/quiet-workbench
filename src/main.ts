@@ -9,7 +9,7 @@ import {
 import type { EntityKind, EntityRecord, LayoutItem, LayoutSchema, TaskRecord, TransactionReceipt } from "./core/types";
 import { DiagnosticService, type DiagnosticVaultReader } from "./core/diagnostic";
 import { createBuiltinWidgetRegistry } from "./core/widget-registry";
-import { getDefaultLayouts, upgradePersistedLayouts, validateLayout } from "./core/layout";
+import { ensureSingleWorkbenchLayout, getDefaultLayouts, upgradePersistedLayouts, validateLayout } from "./core/layout";
 import {
   EntityIndex,
   KnowledgePublicationPlanner,
@@ -58,7 +58,8 @@ interface PersistedPluginData extends Partial<QuietWorkbenchSettings> {
   transactionJournal?: ReturnType<TransactionJournal["serialize"]>;
 }
 
-const CURRENT_SETTINGS_SCHEMA_VERSION = 1;
+const CURRENT_SETTINGS_SCHEMA_VERSION = 2;
+const LEGACY_MEMO_PATH = "40_管理_Management/01_工作_Work/Workbench速记.md";
 
 class ObsidianDiagnosticReader implements DiagnosticVaultReader {
   constructor(private readonly vault: VaultPort) {}
@@ -658,13 +659,21 @@ export default class QuietWorkbenchPlugin extends Plugin {
   private async loadSettings(): Promise<void> {
     const data = (await this.loadData()) as PersistedPluginData | null;
     this.journalData = data?.transactionJournal;
-    const layouts = upgradePersistedLayouts(data?.layouts?.length ? data.layouts : getDefaultLayouts());
+    const layouts = ensureSingleWorkbenchLayout(
+      upgradePersistedLayouts(data?.layouts?.length ? data.layouts : getDefaultLayouts()),
+      data?.activeWorkbenchLayout
+    );
+    const memoPath = !data?.memoPath || data.memoPath === LEGACY_MEMO_PATH
+      ? DEFAULT_SETTINGS.memoPath
+      : data.memoPath;
     this.settings = {
       ...structuredClone(DEFAULT_SETTINGS),
       ...data,
       templates: normalizeTemplatePaths({ ...DEFAULT_SETTINGS.templates, ...data?.templates }),
       clientAliases: { ...DEFAULT_SETTINGS.clientAliases, ...data?.clientAliases },
       enabledPacks: { ...DEFAULT_SETTINGS.enabledPacks, ...data?.enabledPacks },
+      memoPath,
+      activeWorkbenchLayout: "workbench",
       layouts
     };
     if (data && data.settingsSchemaVersion !== CURRENT_SETTINGS_SCHEMA_VERSION) {
@@ -818,7 +827,7 @@ function escapeRegExp(value: string): string {
 }
 
 function sceneName(sceneId: string): string {
-  return { today: "今日执行", projects: "项目管理", knowledge: "知识整理" }[sceneId] ?? sceneId;
+  return { workbench: "工作台", today: "今日执行", projects: "项目管理", knowledge: "知识整理" }[sceneId] ?? sceneId;
 }
 
 function errorMessage(error: unknown): string {

@@ -1717,20 +1717,58 @@
 }
 
 .qwb-task-row {
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  align-items: start;
+  column-gap: 9px;
+  row-gap: 2px;
+  min-height: 48px;
+  padding: 7px 0;
 }
 
 .qwb-task-row .qwb-link {
   display: grid;
+  grid-column: 2;
+  grid-row: 1;
   gap: 2px;
+  min-width: 0;
+  padding: 0;
+  overflow: visible;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
 }
 
 .qwb-task-row .qwb-link small {
+  display: block;
+  min-width: 0;
   overflow: hidden;
   color: var(--text-faint);
   font-size: 9px;
   font-weight: 400;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qwb-task-row > input[type="checkbox"] {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+  margin-top: 2px;
+}
+
+.qwb-task-row > time {
+  grid-column: 2;
+  grid-row: 2;
+  justify-self: start;
+  white-space: nowrap;
+}
+
+.qwb-task-row > .qwb-row-action {
+  grid-column: 3;
+  grid-row: 1 / span 2;
+  align-self: center;
+  min-width: 46px;
 }
 
 .qwb-board {

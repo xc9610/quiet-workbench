@@ -28,7 +28,7 @@ export const DEFAULT_SETTINGS: QuietWorkbenchSettings = {
   knowledgeFolder: "20_技术_Technology",
   formalKnowledgeFolder: "20_技术_Technology/90_待整理_Inbox",
   knowledgeTemplate: "",
-  memoPath: "40_管理_Management/01_工作_Work/Workbench速记.md",
+  memoPath: "40_管理_Management/01_工作_Work/Quiet Workbench 速记.md",
   templates: {
     project: "40_管理_Management/03_模板_Templates/TP 项目记录 v3.md",
     client: "40_管理_Management/03_模板_Templates/TP 客户记录 v2.md",
@@ -49,7 +49,7 @@ export const DEFAULT_SETTINGS: QuietWorkbenchSettings = {
     tasks: true,
     knowledge: true
   },
-  activeWorkbenchLayout: "today",
+  activeWorkbenchLayout: "workbench",
   activeSidebarLayout: "sidebar-default",
   layouts: [],
   transactionLimit: 50
