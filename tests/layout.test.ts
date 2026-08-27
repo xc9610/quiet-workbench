@@ -57,14 +57,53 @@ describe("default layouts", () => {
   it("adds upcoming tasks to old sidebar layouts without losing existing items", () => {
     const oldLayouts = getDefaultLayouts();
     const sidebar = oldLayouts.find((layout) => layout.id === "sidebar-default")!;
-    sidebar.items = sidebar.items.filter((item) => item.widgetId !== "tasks.upcoming");
-    sidebar.items = sidebar.items.map((item) => item.y > 3 ? { ...item, y: item.y - 4 } : item);
+    sidebar.items = [
+      { widgetId: "core.context", x: 0, y: 0, width: 1, height: 3 },
+      { widgetId: "tasks.context", x: 0, y: 3, width: 1, height: 4 },
+      { widgetId: "projects.context", x: 0, y: 7, width: 1, height: 3 },
+      { widgetId: "meetings.context", x: 0, y: 10, width: 1, height: 3 },
+      { widgetId: "core.quick-create", x: 0, y: 13, width: 1, height: 2 }
+    ];
 
     const upgraded = upgradePersistedLayouts(oldLayouts);
     const upgradedSidebar = upgraded.find((layout) => layout.id === "sidebar-default")!;
     expect(upgradedSidebar.items.filter((item) => item.widgetId === "tasks.upcoming")).toHaveLength(1);
-    expect(upgradedSidebar.items.find((item) => item.widgetId === "tasks.context")?.y).toBe(7);
+    expect(upgradedSidebar.items.find((item) => item.widgetId === "capture.memo")?.y).toBe(7);
+    expect(upgradedSidebar.items.find((item) => item.widgetId === "tasks.context")?.y).toBe(10);
     expect(upgradePersistedLayouts(upgraded).find((layout) => layout.id === "sidebar-default")?.items).toEqual(upgradedSidebar.items);
+  });
+
+  it("adds quick memo to the previous default sidebar without changing custom sidebars", () => {
+    const sidebar = getDefaultLayouts().find((layout) => layout.id === "sidebar-default")!;
+    sidebar.items = sidebar.items.filter((item) => item.widgetId !== "capture.memo");
+    sidebar.items = sidebar.items.map((item) => item.y >= 10 ? { ...item, y: item.y - 3 } : item);
+    const upgraded = upgradePersistedLayouts([sidebar])[0];
+    expect(upgraded.items.find((item) => item.widgetId === "capture.memo")).toMatchObject({ y: 7, height: 3 });
+    expect(upgraded.items.find((item) => item.widgetId === "tasks.context")?.y).toBe(10);
+    expect(upgradePersistedLayouts([upgraded])).toEqual([upgraded]);
+  });
+
+  it("adds the daily-entry widgets above the previous project-only workbench", () => {
+    const workbench = {
+      version: 1 as const,
+      id: "workbench",
+      name: "工作台",
+      surface: "workbench" as const,
+      items: [
+        { widgetId: "view.board", instanceId: "status", presetId: "projects.status-board", x: 0, y: 12, width: 12, height: 4 },
+        { widgetId: "view.list", instanceId: "milestones", presetId: "projects.milestones", x: 4, y: 0, width: 4, height: 4 },
+        { widgetId: "view.list", instanceId: "tasks", presetId: "tasks.all", x: 8, y: 0, width: 4, height: 4 },
+        { widgetId: "view.list", instanceId: "clients", presetId: "clients.list", x: 0, y: 4, width: 4, height: 4 },
+        { widgetId: "view.list", instanceId: "suppliers", presetId: "suppliers.list", x: 4, y: 4, width: 4, height: 4 },
+        { widgetId: "view.list", instanceId: "meetings", presetId: "meetings.actions", x: 0, y: 8, width: 12, height: 4 }
+      ]
+    };
+    const upgraded = upgradePersistedLayouts([workbench])[0];
+    expect(upgraded.items.map((item) => item.presetId ?? item.widgetId)).toEqual(expect.arrayContaining([
+      "tasks.today-focus", "capture.memo", "core.quick-create", "projects.recent"
+    ]));
+    expect(upgraded.items.find((item) => item.instanceId === "milestones")?.y).toBe(8);
+    expect(upgradePersistedLayouts([upgraded])).toEqual([upgraded]);
   });
 
   it("upgrades only the exact legacy default today layout and stays idempotent", () => {

@@ -27,7 +27,13 @@ const layouts: LayoutSchema[] = [
       { widgetId: "tasks.today", x: 0, y: 0, width: 8, height: 7 },
       { widgetId: "capture.memo", x: 8, y: 0, width: 4, height: 3 },
       { widgetId: "core.quick-create", x: 8, y: 3, width: 4, height: 2 },
-      { widgetId: "projects.recent", x: 8, y: 5, width: 4, height: 3 }
+      { widgetId: "projects.recent", x: 8, y: 5, width: 4, height: 3 },
+      { widgetId: "projects.status", x: 0, y: 8, width: 7, height: 6 },
+      { widgetId: "meetings.actions", x: 7, y: 8, width: 5, height: 6 },
+      { widgetId: "clients.list", x: 0, y: 14, width: 4, height: 4 },
+      { widgetId: "suppliers.list", x: 4, y: 14, width: 4, height: 4 },
+      { widgetId: "knowledge.inbox", x: 8, y: 14, width: 4, height: 4 },
+      { widgetId: "knowledge.recent", x: 0, y: 18, width: 12, height: 4 }
     ]
   },
   {
@@ -76,10 +82,11 @@ const layouts: LayoutSchema[] = [
     items: [
       { widgetId: "core.context", x: 0, y: 0, width: 1, height: 3 },
       { widgetId: "tasks.upcoming", x: 0, y: 3, width: 1, height: 4 },
-      { widgetId: "tasks.context", x: 0, y: 7, width: 1, height: 4 },
-      { widgetId: "projects.context", x: 0, y: 11, width: 1, height: 3 },
-      { widgetId: "meetings.context", x: 0, y: 14, width: 1, height: 3 },
-      { widgetId: "core.quick-create", x: 0, y: 17, width: 1, height: 2 }
+      { widgetId: "capture.memo", x: 0, y: 7, width: 1, height: 3 },
+      { widgetId: "tasks.context", x: 0, y: 10, width: 1, height: 4 },
+      { widgetId: "projects.context", x: 0, y: 14, width: 1, height: 3 },
+      { widgetId: "meetings.context", x: 0, y: 17, width: 1, height: 3 },
+      { widgetId: "core.quick-create", x: 0, y: 20, width: 1, height: 2 }
     ]
   }
 ];
@@ -106,8 +113,23 @@ export function getDefaultLayouts(): LayoutSchema[] {
 export function upgradePersistedLayouts(persisted: LayoutSchema[]): LayoutSchema[] {
   return persisted.map((layout) => {
     const upgraded = cloneLayout(layout);
+    if (isPreRecommendedWorkbench(upgraded)) {
+      upgraded.items = upgraded.items.map((item) => ({ ...item, y: item.y + 8 }));
+      upgraded.items.unshift(
+        { widgetId: "tasks.today", x: 0, y: 0, width: 8, height: 7 },
+        { widgetId: "capture.memo", x: 8, y: 0, width: 4, height: 3 },
+        { widgetId: "core.quick-create", x: 8, y: 3, width: 4, height: 2 },
+        { widgetId: "projects.recent", x: 8, y: 5, width: 4, height: 3 }
+      );
+      return migrateLayoutWidgets(upgraded);
+    }
     if (isLegacyDefaultToday(upgraded)) {
       return migrateLayoutWidgets(cloneLayout(layouts.find((candidate) => candidate.id === "today")!));
+    }
+    if (isPreMemoDefaultSidebar(upgraded)) {
+      upgraded.items = upgraded.items.map((item) => item.y >= 7 ? { ...item, y: item.y + 3 } : item);
+      upgraded.items.push({ widgetId: "capture.memo", x: 0, y: 7, width: 1, height: 3 });
+      return migrateLayoutWidgets(upgraded);
     }
     if (
       upgraded.id !== "sidebar-default" ||
@@ -119,7 +141,39 @@ export function upgradePersistedLayouts(persisted: LayoutSchema[]): LayoutSchema
     }
     upgraded.items = upgraded.items.map((item) => item.y >= 3 ? { ...item, y: item.y + 4 } : item);
     upgraded.items.push({ widgetId: "tasks.upcoming", x: 0, y: 3, width: 1, height: 4 });
+    upgraded.items = upgraded.items.map((item) => item.y >= 7 ? { ...item, y: item.y + 3 } : item);
+    upgraded.items.push({ widgetId: "capture.memo", x: 0, y: 7, width: 1, height: 3 });
     return migrateLayoutWidgets(upgraded);
+  });
+}
+
+function isPreRecommendedWorkbench(layout: LayoutSchema): boolean {
+  if (layout.id !== "workbench" || layout.surface !== "workbench" || layout.items.length !== 6) return false;
+  const expected = new Set([
+    "projects.status-board",
+    "projects.milestones",
+    "tasks.all",
+    "clients.list",
+    "suppliers.list",
+    "meetings.actions"
+  ]);
+  const actual = new Set(layout.items.map((item) => item.presetId ?? item.widgetId));
+  return actual.size === expected.size && [...actual].every((id) => expected.has(id));
+}
+
+function isPreMemoDefaultSidebar(layout: LayoutSchema): boolean {
+  if (layout.id !== "sidebar-default" || layout.surface !== "sidebar") return false;
+  const expected = new Map<string, readonly [number, number]>([
+    ["core.context", [0, 3]],
+    ["tasks.upcoming", [3, 4]],
+    ["tasks.context", [7, 4]],
+    ["projects.context", [11, 3]],
+    ["meetings.context", [14, 3]],
+    ["core.quick-create", [17, 2]]
+  ]);
+  return layout.items.length === expected.size && layout.items.every((item) => {
+    const position = expected.get(item.widgetId);
+    return Boolean(position && item.x === 0 && item.width === 1 && item.y === position[0] && item.height === position[1]);
   });
 }
 

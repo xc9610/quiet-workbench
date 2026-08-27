@@ -7,10 +7,11 @@ import type { LayoutItem, LayoutSchema } from "./core/types";
 const SIDEBAR_COMPONENTS = [
   ["core.context", "当前笔记"],
   ["tasks.upcoming", "近期待办"],
+  ["capture.memo", "速记"],
   ["tasks.context", "相关任务"],
   ["projects.context", "关联项目"],
   ["meetings.context", "相关会议"],
-  ["core.quick-create", "刷新上下文"]
+  ["core.quick-create", "快捷入口"]
 ] as const;
 
 export interface QuietWorkbenchSettingsHost {

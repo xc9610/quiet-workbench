@@ -5,11 +5,15 @@
   import type { WorkbenchController, WorkbenchSnapshot } from "../ui/controller";
   import { layoutItemKey } from "../core/layout";
   import { EMPTY_SNAPSHOT } from "../ui/controller";
+  import { effectiveTaskDate } from "../domain/widget-data";
 
   export let controller: WorkbenchController;
   let snapshot: WorkbenchSnapshot = controller.getSnapshot() ?? EMPTY_SNAPSHOT;
   let unsubscribe = () => {};
   let upcoming: TaskRecord[] = [];
+  let memoDraft = "";
+  let busy = false;
+  let message = "";
 
   $: upcoming = collectUpcomingTasks(snapshot.tasks);
 
@@ -19,13 +23,13 @@
     untilDate.setDate(today.getDate() + 7);
     const until = formatDate(untilDate, "YYYY-MM-DD");
     return tasks
-      .filter((task) => !task.completed && task.due && task.due <= until)
-      .sort((left, right) => (left.due ?? "").localeCompare(right.due ?? ""))
+      .filter((task) => !task.completed && !task.migrated && effectiveTaskDate(task) && effectiveTaskDate(task)! <= until)
+      .sort((left, right) => (effectiveTaskDate(left) ?? "").localeCompare(effectiveTaskDate(right) ?? ""))
       .slice(0, 10);
   }
 
   function isOverdue(task: TaskRecord): boolean {
-    return Boolean(task.due && task.due < formatDate(new Date(), "YYYY-MM-DD"));
+    return Boolean(effectiveTaskDate(task) && effectiveTaskDate(task)! < formatDate(new Date(), "YYYY-MM-DD"));
   }
 
   function scopeLabel(scope: TaskRecord["scope"]): string {
@@ -39,6 +43,32 @@
     return (layout?.items ?? [])
       .filter((item) => !item.hidden)
       .sort((left, right) => left.y - right.y);
+  }
+
+  async function run(action: () => Promise<unknown>, success: string): Promise<void> {
+    busy = true;
+    message = "";
+    try {
+      await action();
+      message = success;
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function submitMemo(): Promise<void> {
+    const value = memoDraft.trim();
+    if (!value) return;
+    await run(() => controller.appendQuickMemo(value), "已记录");
+    if (message === "已记录") memoDraft = "";
+  }
+
+  function handleMemoKeydown(event: KeyboardEvent): void {
+    if (event.isComposing || event.key !== "Enter" || event.shiftKey) return;
+    event.preventDefault();
+    void submitMemo();
   }
 
   onMount(() => {
@@ -59,7 +89,17 @@
     {:else if item.widgetId === "tasks.upcoming"}
       <section class:collapsed={item.collapsed}>
         <div class="qwb-section-title"><h3>近期待办</h3><strong>{upcoming.length}</strong></div>
-        {#if !item.collapsed}{#each upcoming as task}<button class:overdue={isOverdue(task)} class="qwb-context-row" on:click={() => controller.openPath(task.path)}><i class={task.scope}></i><span><small>{scopeLabel(task.scope)}</small>{task.text}</span>{#if task.due}<time>{task.due}</time>{/if}</button>{:else}<p class="qwb-empty">未来 7 天没有已标记日期的待办。</p>{/each}{/if}
+        {#if !item.collapsed}{#each upcoming as task}<button class:overdue={isOverdue(task)} class="qwb-context-row" on:click={() => controller.openPath(task.path)}><i class={task.scope}></i><span><small>{scopeLabel(task.scope)} · {task.sourceName}</small>{task.text}</span>{#if effectiveTaskDate(task)}<time>{effectiveTaskDate(task)}</time>{/if}</button>{:else}<p class="qwb-empty">未来 7 天没有已标记日期的待办。</p>{/each}{/if}
+      </section>
+    {:else if item.widgetId === "capture.memo"}
+      <section class:collapsed={item.collapsed}>
+        <div class="qwb-section-title"><h3>速记</h3><button class="qwb-context-text-action" disabled={!snapshot.memo.exists} on:click={() => controller.openPath(snapshot.memo.path)}>打开文件</button></div>
+        {#if !item.collapsed}
+          <div class="qwb-context-memo">
+            <textarea bind:value={memoDraft} rows="3" placeholder="记下一条；自动添加时间。" on:keydown={handleMemoKeydown}></textarea>
+            <div><small>Enter 记录 · Shift + Enter 换行</small><button disabled={busy || !controller.settings.writesEnabled || !memoDraft.trim()} on:click={submitMemo}>记录</button></div>
+          </div>
+        {/if}
       </section>
     {:else if item.widgetId === "tasks.context"}
       <section class:collapsed={item.collapsed}>
@@ -77,9 +117,14 @@
         {#if !item.collapsed}{#each snapshot.context.meetings.slice(0, 5) as meeting}<button class="qwb-context-row" on:click={() => controller.openPath(meeting.path)}><span>{meeting.name}</span><b>›</b></button>{:else}<p class="qwb-empty">当前笔记没有关联会议。</p>{/each}{/if}
       </section>
     {:else if item.widgetId === "core.quick-create"}
-      <button class="qwb-button qwb-button-subtle qwb-full" on:click={() => controller.refresh()}>刷新上下文</button>
+      <section class:collapsed={item.collapsed}>
+        <div class="qwb-section-title"><h3>快捷入口</h3></div>
+        {#if !item.collapsed}<div class="qwb-context-actions"><button on:click={() => controller.openWorkbench()}>工作台</button><button on:click={() => controller.openTaskBoard()}>任务看板</button><button disabled={busy} on:click={() => run(() => controller.refresh(), "已刷新")}>刷新</button></div>{/if}
+      </section>
     {/if}
   {/each}
+
+  {#if message}<p class="qwb-context-message" role="status">{message}</p>{/if}
 
   <footer>
     <span class:enabled={controller.settings.writesEnabled} class="qwb-write-state"><span class="qwb-state-dot"></span>{controller.settings.writesEnabled ? "写入已启用" : "只读诊断"}</span>

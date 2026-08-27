@@ -59,14 +59,16 @@ interface PersistedPluginData extends Partial<QuietWorkbenchSettings> {
   transactionJournal?: ReturnType<TransactionJournal["serialize"]>;
 }
 
-const CURRENT_SETTINGS_SCHEMA_VERSION = 2;
+const CURRENT_SETTINGS_SCHEMA_VERSION = 3;
 const LEGACY_MEMO_PATH = "40_管理_Management/01_工作_Work/Workbench速记.md";
 const ASTERISM_ICON_ID = "asterism-mark";
 const ASTERISM_ICON_SVG = `
-  <path d="M6.4 2.6 7.45 5.45 10.3 6.5 7.45 7.55 6.4 10.4 5.35 7.55 2.5 6.5 5.35 5.45Z" fill="currentColor" stroke="none" />
-  <path d="M17.7 3.1 18.45 5.15 20.5 5.9 18.45 6.65 17.7 8.7 16.95 6.65 14.9 5.9 16.95 5.15Z" fill="currentColor" stroke="none" />
-  <path d="M15.15 12.2 16.45 15.65 19.9 16.95 16.45 18.25 15.15 21.7 13.85 18.25 10.4 16.95 13.85 15.65Z" fill="currentColor" stroke="none" />
-  <path d="M8.35 8.45 12.65 13.35M16.95 8.55 15.95 12.65" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" opacity="0.72" />
+  <g transform="scale(4.1666667)">
+    <path d="M6.4 2.6 7.45 5.45 10.3 6.5 7.45 7.55 6.4 10.4 5.35 7.55 2.5 6.5 5.35 5.45Z" fill="currentColor" stroke="none" />
+    <path d="M17.7 3.1 18.45 5.15 20.5 5.9 18.45 6.65 17.7 8.7 16.95 6.65 14.9 5.9 16.95 5.15Z" fill="currentColor" stroke="none" />
+    <path d="M15.15 12.2 16.45 15.65 19.9 16.95 16.45 18.25 15.15 21.7 13.85 18.25 10.4 16.95 13.85 15.65Z" fill="currentColor" stroke="none" />
+    <path d="M8.35 8.45 12.65 13.35M16.95 8.55 15.95 12.65" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" opacity="0.72" />
+  </g>
 `;
 
 class ObsidianDiagnosticReader implements DiagnosticVaultReader {
@@ -194,6 +196,10 @@ class PluginWorkbenchController implements WorkbenchController {
 
   async openTaskBoard(): Promise<void> {
     await this.plugin.activateTaskBoard();
+  }
+
+  async openWorkbench(): Promise<void> {
+    await this.plugin.activateWorkbench();
   }
 
   async setActivePath(path?: string): Promise<void> {

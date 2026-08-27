@@ -49,7 +49,7 @@
   type SceneId = string;
   type DialogKind = "entity" | "task" | "task-edit" | "migrate" | "knowledge" | "yolo-preview" | null;
   type MoveMode = "move" | "resize";
-  const UI_VERSION = "0.6.2";
+  const UI_VERSION = "0.6.3";
 
   interface SceneDefinition {
     id: SceneId;
@@ -173,6 +173,9 @@
         original: LayoutItem;
       }
     | undefined;
+  let heroMetrics: Array<{ label: string; value: number; note: string; tone: "danger" | "accent" | "normal" }> = [];
+
+  $: heroMetrics = buildHeroMetrics(snapshot);
 
   const widgetTitles: Record<string, string> = {
     ...Object.fromEntries(BUILTIN_WIDGETS.map((widget) => [widget.id, widget.title])),
@@ -209,6 +212,29 @@
 
   function widgetTitle(item: LayoutItem): string {
     return item.title || getWidgetPreset(item.presetId)?.title || widgetTitles[item.widgetId] || item.widgetId;
+  }
+
+  function buildHeroMetrics(current: WorkbenchSnapshot): Array<{ label: string; value: number; note: string; tone: "danger" | "accent" | "normal" }> {
+    const today = formatDate(new Date(), "YYYY-MM-DD");
+    const weekEnd = dateAfter(today, 7);
+    const tasks = current.tasks.filter((task) => !task.completed && !task.migrated);
+    const overdue = tasks.filter((task) => effectiveTaskDate(task) && effectiveTaskDate(task)! < today).length;
+    const dueToday = tasks.filter((task) => effectiveTaskDate(task) === today).length;
+    const coming = tasks.filter((task) => {
+      const date = effectiveTaskDate(task);
+      return Boolean(date && date > today && date <= weekEnd);
+    }).length;
+    const missingNext = current.projects.filter((project) => !project.detail?.trim()).length;
+    return [
+      { label: "逾期任务", value: overdue, note: "overdue", tone: "danger" },
+      { label: "今天到期", value: dueToday, note: "due today", tone: "accent" },
+      { label: "未来 7 天", value: coming, note: "upcoming", tone: "normal" },
+      { label: "缺少下一步", value: missingNext, note: "next action", tone: missingNext ? "danger" : "normal" }
+    ];
+  }
+
+  function heroDate(): string {
+    return new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", weekday: "long" }).format(new Date());
   }
 
   function focusFiltersVisible(item: LayoutItem): boolean {
@@ -1335,21 +1361,26 @@
 </script>
 
 <div class:layout-editing={layoutEditMode} class="qwb-shell" data-scene={activeScene}>
-  <header class="qwb-header">
-    <div>
-      <div class="qwb-eyebrow">ASTERISM · 星序 · {UI_VERSION}</div>
-      <h1>工作台</h1>
-      <p>自由添加、组合和调整组件</p>
+  <header class="qwb-hero">
+    <div class="qwb-hero-topline"><span>ASTERISM · 星序 · {UI_VERSION}</span><time>{heroDate()}</time></div>
+    <div class="qwb-hero-main">
+      <div class="qwb-hero-copy">
+        <span>每日总览</span>
+        <h1>今天，继续推进</h1>
+        <p>先看清下一步，再把分散的信息带回项目。</p>
+      </div>
+      <div class="qwb-header-actions">
+        <span class:enabled={controller.settings.writesEnabled} class="qwb-write-state"><span class="qwb-state-dot"></span>{controller.settings.writesEnabled ? "写入已启用" : "只读诊断"}</span>
+        <button class="qwb-button qwb-button-primary" on:click={() => controller.openTaskBoard()}>任务看板</button>
+        <button class:active={layoutEditMode} class="qwb-button qwb-layout-mode-button" aria-pressed={layoutEditMode} on:click={() => (layoutEditMode = !layoutEditMode)}>{layoutEditMode ? "完成编辑" : "编辑布局"}</button>
+        <button use:obsidianIcon={"refresh-cw"} class="qwb-icon-button" aria-label="刷新工作台" title="刷新" disabled={busy} on:click={() => run(() => controller.refresh(), "已刷新")}></button>
+        <button use:obsidianIcon={"rotate-ccw"} class="qwb-icon-button" aria-label="撤销最近一次业务写入" title="撤销业务写入" disabled={busy} on:click={() => run(() => controller.undoLastTransaction(), "已撤销最近一次操作")}></button>
+      </div>
     </div>
-    <div class="qwb-header-actions">
-      <span class:enabled={controller.settings.writesEnabled} class="qwb-write-state">
-        <span class="qwb-state-dot"></span>
-        {controller.settings.writesEnabled ? "写入已启用" : "只读诊断"}
-      </span>
-      <button class="qwb-icon-button" aria-label="刷新工作台" title="刷新" disabled={busy} on:click={() => run(() => controller.refresh(), "已刷新")}>↻</button>
-      <button class:active={layoutEditMode} class="qwb-button qwb-layout-mode-button" aria-pressed={layoutEditMode} on:click={() => (layoutEditMode = !layoutEditMode)}>{layoutEditMode ? "完成编辑" : "编辑布局"}</button>
-      <button class="qwb-button qwb-button-subtle" on:click={() => controller.openTaskBoard()}>任务看板</button>
-      <button class="qwb-button qwb-button-subtle" disabled={busy} on:click={() => run(() => controller.undoLastTransaction(), "已撤销最近一次操作")}>撤销</button>
+    <div class="qwb-hero-metrics">
+      {#each heroMetrics as metric}
+        <div class:danger={metric.tone === "danger"} class:accent={metric.tone === "accent"} class="qwb-hero-metric"><span>{metric.label}</span><strong>{metric.value}</strong><small>{metric.note}</small></div>
+      {/each}
     </div>
   </header>
 

@@ -18,17 +18,39 @@
   min-height: 100%;
   padding: clamp(16px, 2.4vw, 30px);
   color: var(--text-normal);
-  background:
-    radial-gradient(circle at 84% 0%, var(--qwb-accent-soft), transparent 34%),
-    var(--background-primary);
+  background: var(--background-primary);
 }
 
-.qwb-header {
+.qwb-hero {
+  display: grid;
+  gap: clamp(18px, 2.2vw, 28px);
+  margin-bottom: 18px;
+  padding: clamp(22px, 3.2vw, 40px);
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--interactive-accent) 18%, var(--qwb-border));
+  border-radius: clamp(16px, 2vw, 22px);
+  background: linear-gradient(118deg, color-mix(in srgb, var(--color-blue) 8%, var(--background-primary)), color-mix(in srgb, var(--interactive-accent) 14%, var(--background-primary)));
+}
+
+.qwb-hero-topline,
+.qwb-hero-main {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 24px;
-  margin-bottom: 18px;
+}
+
+.qwb-hero-topline {
+  color: var(--text-faint);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+}
+
+.qwb-hero-copy > span {
+  color: var(--text-muted);
+  font-size: 11px;
 }
 
 .qwb-eyebrow {
@@ -39,7 +61,7 @@
   letter-spacing: .14em;
 }
 
-.qwb-header h1,
+.qwb-hero h1,
 .qwb-modal h2,
 .qwb-context h2 {
   margin: 0;
@@ -49,10 +71,56 @@
   letter-spacing: -.025em;
 }
 
-.qwb-header p {
-  margin: 5px 0 0;
+.qwb-hero h1 {
+  margin-top: 10px;
+  font-size: clamp(36px, 5.4vw, 62px);
+  font-weight: 720;
+  line-height: 1.05;
+  letter-spacing: -.055em;
+}
+
+.qwb-hero p {
+  margin: 10px 0 0;
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: 14px;
+}
+
+.qwb-hero-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(90px, 150px));
+  gap: 0;
+}
+
+.qwb-hero-metric {
+  display: grid;
+  gap: 1px;
+  padding: 0 18px;
+  border-left: 1px solid var(--qwb-border);
+}
+
+.qwb-hero-metric:first-child {
+  padding-left: 0;
+  border-left: 0;
+}
+
+.qwb-hero-metric span,
+.qwb-hero-metric small {
+  color: var(--text-muted);
+  font-size: 9px;
+}
+
+.qwb-hero-metric strong {
+  color: var(--text-normal);
+  font-size: 22px;
+  line-height: 1.1;
+}
+
+.qwb-hero-metric.danger strong {
+  color: var(--text-error);
+}
+
+.qwb-hero-metric.accent strong {
+  color: var(--text-accent);
 }
 
 .qwb-header-actions,
@@ -131,6 +199,11 @@
   width: 34px;
   padding: 0;
   font-size: 19px;
+}
+
+.qwb-icon-button svg {
+  width: 16px;
+  height: 16px;
 }
 
 .qwb-full {
@@ -1428,6 +1501,68 @@
   color: var(--text-faint);
 }
 
+.qwb-context-memo {
+  display: grid;
+  gap: 7px;
+}
+
+.qwb-context-memo textarea {
+  width: 100%;
+  min-height: 74px;
+  resize: vertical;
+  border-radius: 9px;
+  font-size: 11px;
+}
+
+.qwb-context-memo > div,
+.qwb-context-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.qwb-context-memo > div {
+  justify-content: space-between;
+}
+
+.qwb-context-memo small {
+  color: var(--text-faint);
+  font-size: 8px;
+}
+
+.qwb-context-memo button,
+.qwb-context-actions button,
+.qwb-context-text-action {
+  min-height: 30px;
+  padding: 5px 8px;
+  border: 1px solid var(--qwb-border);
+  border-radius: 8px;
+  background: var(--background-secondary);
+  box-shadow: none;
+  color: var(--text-muted);
+  font-size: 9px;
+}
+
+.qwb-context-text-action {
+  min-height: auto;
+  padding: 2px 5px;
+  border: 0;
+  background: transparent;
+}
+
+.qwb-context-actions {
+  flex-wrap: wrap;
+}
+
+.qwb-context-message {
+  margin: 12px 0 0;
+  padding: 7px 9px;
+  border-radius: 8px;
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  font-size: 9px;
+}
+
 .qwb-context > footer {
   display: grid;
   gap: 7px;
@@ -1473,9 +1608,28 @@
     padding: 14px 10px 24px;
   }
 
-  .qwb-header {
+  .qwb-hero-main,
+  .qwb-hero-topline {
     display: grid;
     gap: 12px;
+  }
+
+  .qwb-hero {
+    padding: 20px 16px;
+  }
+
+  .qwb-hero h1 {
+    font-size: clamp(34px, 12vw, 48px);
+  }
+
+  .qwb-hero-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px 0;
+  }
+
+  .qwb-hero-metric:nth-child(3) {
+    padding-left: 0;
+    border-left: 0;
   }
 
   .qwb-header-actions {
@@ -1721,8 +1875,16 @@
   grid-template-rows: auto;
   align-items: center;
   column-gap: 9px;
-  min-height: 44px;
-  padding: 7px 0;
+  min-height: 54px;
+  padding: 9px 10px;
+  border: 1px solid var(--qwb-border);
+  border-radius: 9px;
+  background: var(--background-primary);
+}
+
+.qwb-task-list {
+  display: grid;
+  gap: 7px;
 }
 
 .qwb-task-row-no-check {
@@ -1734,6 +1896,10 @@
   min-width: 0;
   padding: 0;
   overflow: hidden;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: var(--text-normal) !important;
   line-height: 1.35;
   text-align: left;
   white-space: normal;
@@ -1802,6 +1968,33 @@
 
 .qwb-task-row > .qwb-row-action {
   min-width: 46px;
+  border-color: var(--qwb-border);
+  background: var(--background-secondary);
+  box-shadow: none;
+}
+
+.qwb-task-row:hover,
+.qwb-entity-list > button:hover,
+.qwb-client-list > button:hover,
+.qwb-project-table > button:hover {
+  border-color: color-mix(in srgb, var(--interactive-accent) 28%, var(--qwb-border));
+  background: var(--background-modifier-hover);
+}
+
+.qwb-entity-list {
+  gap: 7px;
+}
+
+.qwb-entity-list > button {
+  min-height: 54px;
+  padding: 9px 10px;
+  border: 1px solid var(--qwb-border);
+  border-radius: 9px;
+  background: var(--background-primary);
+}
+
+.qwb-entity-list > button > i {
+  font-size: 15px;
 }
 
 @container (max-width: 520px) {

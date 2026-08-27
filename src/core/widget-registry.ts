@@ -202,7 +202,7 @@ const LEGACY_WIDGETS: RegisteredWidgetDefinition[] = [
   { id: "tasks.client-actions", title: "客户行动", description: "按客户汇总行动任务", surfaces: ["workbench"], pack: "tasks", refresh: "live", defaultSize: { width: 6, height: 5 }, validateConfig: validateCollectionConfig },
   { id: "tasks.upcoming", title: "近期待办", surfaces: ["sidebar"], pack: "tasks", refresh: "live", defaultSize: { width: 1, height: 4 } },
   { id: "core.calendar", title: "日历", surfaces: ["workbench"], pack: "core", refresh: "live", defaultSize: { width: 3, height: 5 } },
-  { id: "capture.memo", title: "速记", surfaces: ["workbench"], pack: "core", refresh: "live", defaultSize: { width: 4, height: 3 } },
+  { id: "capture.memo", title: "速记", surfaces: both, pack: "core", refresh: "live", defaultSize: { width: 4, height: 3 } },
   { id: "core.quick-create", title: "快捷创建", surfaces: both, pack: "core", refresh: "manual", defaultSize: { width: 3, height: 2 } },
   { id: "core.diagnostics", title: "诊断", surfaces: both, pack: "core", refresh: "manual", defaultSize: { width: 3, height: 3 } },
   { id: "projects.recent", title: "最近项目", surfaces: ["workbench"], pack: "project", refresh: "live", defaultSize: { width: 3, height: 3 } },
