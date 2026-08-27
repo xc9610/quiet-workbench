@@ -142,6 +142,10 @@
   gap: 8px;
 }
 
+.qwb-header-actions {
+  gap: 6px;
+}
+
 .qwb-write-state {
   display: inline-flex;
   align-items: center;
@@ -192,7 +196,8 @@
   color: var(--text-muted);
 }
 
-.qwb-icon-button.active {
+.qwb-icon-button.active,
+.qwb-hero-action.active {
   border-color: var(--interactive-accent);
   background: var(--qwb-accent-soft);
   color: var(--text-accent);
@@ -209,13 +214,61 @@
   height: 16px;
 }
 
-.qwb-hero-status {
+.qwb-hero-action {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 32px;
-  flex: 0 0 20px;
+  width: 34px;
+  height: 34px;
+  min-width: 34px;
+  min-height: 34px;
+  padding: 0;
+  border: 1px solid var(--qwb-border);
+  border-radius: 9px;
+  background: var(--background-secondary);
+  box-shadow: none !important;
+  color: var(--text-muted);
+  transition: color .12s ease, border-color .12s ease, background .12s ease, transform .06s ease;
+}
+
+.qwb-hero-action:not(.qwb-hero-status):hover {
+  border-color: color-mix(in srgb, var(--interactive-accent) 38%, var(--qwb-border));
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.qwb-hero-action:not(.qwb-hero-status):active {
+  transform: translateY(1px);
+}
+
+.qwb-hero-action:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 2px;
+}
+
+.qwb-hero-action svg,
+.qwb-hero-action > span:first-child svg {
+  width: 16px;
+  height: 16px;
+}
+
+.qwb-hero-action-wide {
+  width: auto;
+  padding: 0 11px;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.qwb-hero-action-wide > span:first-child {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.qwb-hero-status {
+  flex: 0 0 34px;
 }
 
 .qwb-hero-status.enabled .qwb-state-dot {
@@ -1659,7 +1712,7 @@
     flex-wrap: wrap;
   }
 
-  .qwb-header-actions .qwb-hero-status { margin-left: 2px; }
+  .qwb-header-actions .qwb-hero-status { margin-left: 0; }
 
   .qwb-safety-banner {
     align-items: flex-start;
