@@ -1,6 +1,7 @@
 import type { LayoutItem, LayoutSchema, WorkbenchSurface } from "./types";
 import type { WidgetRegistry } from "./widget-registry";
 import { migrateLegacyWidgetItem } from "./widget-model";
+import { ORDERED_GRID_MAX_SPAN } from "./ordered-grid";
 
 export interface LayoutValidationIssue {
   path: string;
@@ -263,6 +264,12 @@ export function validateLayout(
         const field = raw[key];
         if (!Number.isInteger(field) || (key.startsWith("w") || key.startsWith("h") ? Number(field) <= 0 : Number(field) < 0)) {
           issues.push({ path: `${path}.${key}`, message: `${key} must be a valid integer` });
+        }
+      }
+      for (const key of ["cols", "rows"] as const) {
+        const field = raw[key];
+        if (field !== undefined && (!Number.isInteger(field) || Number(field) < 1 || Number(field) > ORDERED_GRID_MAX_SPAN)) {
+          issues.push({ path: `${path}.${key}`, message: `${key} must be an integer from 1 to ${ORDERED_GRID_MAX_SPAN}` });
         }
       }
       for (const key of ["hidden", "collapsed"] as const) {

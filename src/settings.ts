@@ -18,6 +18,9 @@ export interface QuietWorkbenchSettings {
   activeWorkbenchLayout: string;
   activeSidebarLayout: string;
   layouts: LayoutSchema[];
+  /** Layout engine marker and reversible snapshot from before ordered-grid migration. */
+  orderedGridVersion: number;
+  legacyPositionedLayouts: LayoutSchema[];
   transactionLimit: number;
 }
 
@@ -55,5 +58,7 @@ export const DEFAULT_SETTINGS: QuietWorkbenchSettings = {
   activeWorkbenchLayout: "workbench",
   activeSidebarLayout: "sidebar-default",
   layouts: [],
+  orderedGridVersion: 0,
+  legacyPositionedLayouts: [],
   transactionLimit: 50
 };

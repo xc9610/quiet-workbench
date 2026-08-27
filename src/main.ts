@@ -12,6 +12,12 @@ import { DiagnosticService, type DiagnosticVaultReader } from "./core/diagnostic
 import { createBuiltinWidgetRegistry } from "./core/widget-registry";
 import { ensureSingleWorkbenchLayout, getDefaultLayouts, upgradePersistedLayouts, validateLayout } from "./core/layout";
 import {
+  migrateLayoutToOrderedGrid,
+  migrateLayoutsToOrderedGrid,
+  normalizeOrderedItems,
+  ORDERED_GRID_VERSION
+} from "./core/ordered-grid";
+import {
   EntityIndex,
   KnowledgePublicationPlanner,
   MeetingMigrationService,
@@ -59,7 +65,7 @@ interface PersistedPluginData extends Partial<QuietWorkbenchSettings> {
   transactionJournal?: ReturnType<TransactionJournal["serialize"]>;
 }
 
-const CURRENT_SETTINGS_SCHEMA_VERSION = 4;
+const CURRENT_SETTINGS_SCHEMA_VERSION = 5;
 const LEGACY_MEMO_PATH = "40_管理_Management/01_工作_Work/Workbench速记.md";
 const ASTERISM_ICON_ID = "asterism-mark";
 const ASTERISM_ICON_SVG = `
@@ -360,7 +366,7 @@ class PluginWorkbenchController implements WorkbenchController {
       id: sceneId,
       name: this.plugin.settings.layouts.find((layout) => layout.id === sceneId)?.name ?? sceneName(sceneId),
       surface: "workbench",
-      items: items.map((item) => ({ ...item, config: item.config ? structuredClone(item.config) : undefined }))
+      items: normalizeOrderedItems(items)
     };
     const result = validateLayout(candidate, registry);
     if (!result.valid) throw new Error(result.issues.map((issue) => `${issue.path}: ${issue.message}`).join("；"));
@@ -397,8 +403,9 @@ class PluginWorkbenchController implements WorkbenchController {
     const original = getDefaultLayouts().find((layout) => layout.id === sceneId);
     if (!original) throw new Error("自定义布局没有内置默认值，可复制其他布局后继续调整。");
     const index = this.plugin.settings.layouts.findIndex((layout) => layout.id === sceneId && layout.surface === "workbench");
-    if (index >= 0) this.plugin.settings.layouts[index] = original;
-    else this.plugin.settings.layouts.push(original);
+    const migrated = migrateLayoutToOrderedGrid(original);
+    if (index >= 0) this.plugin.settings.layouts[index] = migrated;
+    else this.plugin.settings.layouts.push(migrated);
     await this.plugin.saveSettings();
   }
 
@@ -415,7 +422,7 @@ class PluginWorkbenchController implements WorkbenchController {
     if (this.plugin.settings.layouts.some((layout) => layout.id === result.layout.id)) {
       throw new Error(`布局 ID 已存在：${result.layout.id}`);
     }
-    this.plugin.settings.layouts.push(result.layout);
+    this.plugin.settings.layouts.push(migrateLayoutToOrderedGrid(result.layout));
     this.plugin.settings.activeWorkbenchLayout = result.layout.id;
     await this.plugin.saveSettings();
     return result.layout.id;
@@ -674,10 +681,15 @@ export default class QuietWorkbenchPlugin extends Plugin {
   private async loadSettings(): Promise<void> {
     const data = (await this.loadData()) as PersistedPluginData | null;
     this.journalData = data?.transactionJournal;
-    const layouts = ensureSingleWorkbenchLayout(
+    const positionedLayouts = ensureSingleWorkbenchLayout(
       upgradePersistedLayouts(data?.layouts?.length ? data.layouts : getDefaultLayouts()),
       data?.activeWorkbenchLayout
     );
+    const needsOrderedGridMigration = data?.orderedGridVersion !== ORDERED_GRID_VERSION;
+    const layouts = migrateLayoutsToOrderedGrid(positionedLayouts);
+    const legacyPositionedLayouts = needsOrderedGridMigration && data?.layouts?.length
+      ? structuredClone(positionedLayouts)
+      : structuredClone(data?.legacyPositionedLayouts ?? []);
     const memoPath = !data?.memoPath || data.memoPath === LEGACY_MEMO_PATH
       ? DEFAULT_SETTINGS.memoPath
       : data.memoPath;
@@ -694,9 +706,11 @@ export default class QuietWorkbenchPlugin extends Plugin {
       },
       memoPath,
       activeWorkbenchLayout: "workbench",
-      layouts
+      layouts,
+      orderedGridVersion: ORDERED_GRID_VERSION,
+      legacyPositionedLayouts
     };
-    if (data && data.settingsSchemaVersion !== CURRENT_SETTINGS_SCHEMA_VERSION) {
+    if (data && (data.settingsSchemaVersion !== CURRENT_SETTINGS_SCHEMA_VERSION || needsOrderedGridMigration)) {
       await this.saveData({
         ...this.settings,
         settingsSchemaVersion: CURRENT_SETTINGS_SCHEMA_VERSION,

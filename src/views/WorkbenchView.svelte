@@ -13,6 +13,15 @@
   import type { MeetingMigrationBatchResult } from "../services/meeting-migration-service";
   import type { KnowledgePublicationPreview } from "../services/knowledge-publishing-service";
   import { layoutItemKey } from "../core/layout";
+  import {
+    clampSpan,
+    computeOrderedGridColumns,
+    itemCols,
+    itemRows,
+    legacyHeightToRows,
+    legacyWidthToCols,
+    normalizeOrderedItems
+  } from "../core/ordered-grid";
   import { BUILTIN_WIDGETS } from "../core/widget-registry";
   import {
     defaultConfigForType,
@@ -50,7 +59,7 @@
   type SceneId = string;
   type DialogKind = "entity" | "task" | "task-edit" | "migrate" | "knowledge" | "yolo-preview" | null;
   type MoveMode = "move" | "resize";
-  const UI_VERSION = "0.6.5";
+  const UI_VERSION = "0.6.6";
 
   interface SceneDefinition {
     id: SceneId;
@@ -163,15 +172,33 @@
   let widgetSearch: Record<string, string> = {};
   let isDesktop = !Platform.isMobile;
   let gridEl: HTMLDivElement;
+  let gridColumnCount = 4;
+  let gridResizeObserver: ResizeObserver | undefined;
   let unsubscribe = () => {};
   let drag:
     | {
+        kind: "move";
         pointerId: number;
         instanceId: string;
-        mode: MoveMode;
+        card: HTMLElement;
+        placeholder: HTMLElement;
+        offsetX: number;
+        offsetY: number;
+        lastX: number;
+        lastY: number;
+        raf: number | null;
+        originalItems: LayoutItem[];
+      }
+    | {
+        kind: "resize";
+        pointerId: number;
+        instanceId: string;
+        card: HTMLElement;
         startX: number;
         startY: number;
-        original: LayoutItem;
+        startCols: number;
+        startRows: number;
+        originalItems: LayoutItem[];
       }
     | undefined;
   let heroMetrics: Array<{ label: string; value: number; note: string; tone: "danger" | "accent" | "normal" }> = [];
@@ -290,7 +317,7 @@
       (layout) => layout.surface === "workbench" && layout.id === sceneId
     );
     const source = saved?.items ?? sceneDefinitions.find((scene) => scene.id === sceneId)?.items ?? [];
-    return source.map((item) => ({ ...item, config: item.config ? structuredClone(item.config) : undefined }));
+    return normalizeOrderedItems(source);
   }
 
   function hydrateFocusFilters(): void {
@@ -558,6 +585,8 @@
       y: nextWidgetY(),
       width: Math.min(12, Math.max(3, definition.defaultSize.width)),
       height: Math.max(2, definition.defaultSize.height),
+      cols: legacyWidthToCols(definition.defaultSize.width),
+      rows: legacyHeightToRows(definition.defaultSize.height),
       config: preset
         ? structuredClone(preset.config) as unknown as Record<string, unknown>
         : defaultWidgetConfig(widgetId)
@@ -1028,56 +1057,217 @@
 
   function itemStyle(item: LayoutItem): string {
     if (!isDesktop) return "";
-    return [
-      `grid-column: ${item.x + 1} / span ${item.width}`,
-      `grid-row: ${item.y + 1} / span ${item.collapsed ? 1 : item.height}`
-    ].join(";");
+    const cols = itemCols(item, gridColumnCount);
+    const rows = item.collapsed ? 1 : itemRows(item);
+    return `--cols:${cols};--rows:${rows};grid-column:span ${cols};grid-row:span ${rows}`;
   }
 
   function beginPointer(event: PointerEvent, item: LayoutItem, mode: MoveMode): void {
-    if (!isDesktop || !layoutEditMode) return;
+    if (!isDesktop || !layoutEditMode || drag || !gridEl) return;
     event.preventDefault();
-    const target = event.currentTarget as HTMLElement;
-    target.setPointerCapture?.(event.pointerId);
+    event.stopPropagation();
+    const card = (event.currentTarget as HTMLElement).closest(".qwb-widget") as HTMLElement | null;
+    if (!card) return;
+    const originalItems = cloneItems(items);
+    if (mode === "resize") {
+      card.classList.add("qwb-widget--resizing");
+      drag = {
+        kind: "resize",
+        pointerId: event.pointerId,
+        instanceId: itemKey(item),
+        card,
+        startX: event.clientX,
+        startY: event.clientY,
+        startCols: itemCols(item, gridColumnCount),
+        startRows: itemRows(item),
+        originalItems
+      };
+      showResizeBadge(card, itemCols(item, gridColumnCount), itemRows(item));
+      return;
+    }
+
+    // Xove Dashboard ordered-grid drag: a same-span placeholder keeps the
+    // grid slot while the real card is lifted into a fixed layer.
+    const rect = card.getBoundingClientRect();
+    const placeholder = document.createElement("div");
+    placeholder.className = "qwb-layout-placeholder";
+    placeholder.style.setProperty("--cols", String(itemCols(item, gridColumnCount)));
+    placeholder.style.setProperty("--rows", String(item.collapsed ? 1 : itemRows(item)));
+    placeholder.style.gridColumn = `span ${itemCols(item, gridColumnCount)}`;
+    placeholder.style.gridRow = `span ${item.collapsed ? 1 : itemRows(item)}`;
+    card.parentNode?.insertBefore(placeholder, card);
+
+    card.classList.add("qwb-widget--dragging");
+    card.style.width = `${rect.width}px`;
+    card.style.height = `${rect.height}px`;
+    card.style.left = `${rect.left}px`;
+    card.style.top = `${rect.top}px`;
+    card.style.position = "fixed";
+    card.style.zIndex = "9999";
+    card.style.pointerEvents = "none";
     drag = {
+      kind: "move",
       pointerId: event.pointerId,
       instanceId: itemKey(item),
-      mode,
-      startX: event.clientX,
-      startY: event.clientY,
-      original: { ...item }
+      card,
+      placeholder,
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top,
+      lastX: event.clientX,
+      lastY: event.clientY,
+      raf: null,
+      originalItems
     };
   }
 
   function pointerMove(event: PointerEvent): void {
     if (!drag || event.pointerId !== drag.pointerId || !gridEl) return;
-    const cellWidth = Math.max(gridEl.clientWidth / 12, 1);
-    const cellHeight = 76;
-    const dx = Math.round((event.clientX - drag.startX) / cellWidth);
-    const dy = Math.round((event.clientY - drag.startY) / cellHeight);
-    items = items.map((item) => {
-      if (itemKey(item) !== drag?.instanceId) return item;
-      const original = drag.original;
-      if (drag.mode === "move") {
-        return {
-          ...item,
-          x: Math.max(0, Math.min(12 - original.width, original.x + dx)),
-          y: Math.max(0, original.y + dy)
-        };
-      }
-      return {
-        ...item,
-        width: Math.max(3, Math.min(12 - original.x, original.width + dx)),
-        height: Math.max(2, original.height + dy)
-      };
+    if (drag.kind === "resize") {
+      resizeDuringPointer(event, drag);
+      return;
+    }
+    drag.lastX = event.clientX;
+    drag.lastY = event.clientY;
+    drag.card.style.left = `${event.clientX - drag.offsetX}px`;
+    drag.card.style.top = `${event.clientY - drag.offsetY}px`;
+    if (drag.raf !== null) return;
+    const current = drag;
+    drag.raf = window.requestAnimationFrame(() => {
+      current.raf = null;
+      if (drag === current) reflowDuringDrag(current);
     });
   }
 
   async function pointerUp(event: PointerEvent): Promise<void> {
     if (!drag || event.pointerId !== drag.pointerId) return;
-    layoutUndo = [...layoutUndo.slice(-19), items.map((item) => itemKey(item) === drag?.instanceId ? { ...drag.original } : { ...item })];
+    const finished = drag;
     drag = undefined;
+    if (finished.kind === "move") {
+      if (finished.raf !== null) window.cancelAnimationFrame(finished.raf);
+      restoreDraggedCard(finished.card);
+      finished.placeholder.parentNode?.insertBefore(finished.card, finished.placeholder);
+      finished.placeholder.remove();
+      items = orderedItemsFromGrid(items);
+    } else {
+      finished.card.classList.remove("qwb-widget--resizing", "is-limit");
+      finished.card.querySelector(".qwb-resize-ratio")?.remove();
+    }
+    layoutUndo = [...layoutUndo.slice(-19), finished.originalItems];
+    items = normalizeOrderedItems(items);
     await controller.saveLayout(activeScene, items);
+  }
+
+  function resizeDuringPointer(
+    event: PointerEvent,
+    state: Extract<NonNullable<typeof drag>, { kind: "resize" }>
+  ): void {
+    const { unit, gap } = gridUnit();
+    const wantedCols = state.startCols + Math.round((event.clientX - state.startX) / Math.max(1, unit + gap));
+    const wantedRows = state.startRows + Math.round((event.clientY - state.startY) / Math.max(1, unit + gap));
+    const cols = clampSpan(wantedCols, gridColumnCount);
+    const rows = clampSpan(wantedRows);
+    state.card.style.setProperty("--cols", String(cols));
+    state.card.style.setProperty("--rows", String(rows));
+    state.card.style.gridColumn = `span ${cols}`;
+    state.card.style.gridRow = `span ${rows}`;
+    state.card.classList.toggle("is-limit", wantedCols !== cols || wantedRows !== rows);
+    showResizeBadge(state.card, cols, rows);
+    items = items.map((item) => itemKey(item) === state.instanceId ? { ...item, cols, rows } : item);
+  }
+
+  function reflowDuringDrag(state: Extract<NonNullable<typeof drag>, { kind: "move" }>): void {
+    const cards = Array.from(gridEl.children).filter((node): node is HTMLElement =>
+      node instanceof HTMLElement && node.classList.contains("qwb-widget") && !node.classList.contains("qwb-widget--dragging")
+    );
+    let reference: HTMLElement | null = null;
+    for (const card of cards) {
+      const rect = card.getBoundingClientRect();
+      if (state.lastY < rect.top) { reference = card; break; }
+      if (state.lastY > rect.bottom) continue;
+      if (state.lastX < rect.left + rect.width / 2) { reference = card; break; }
+    }
+    if (state.placeholder.nextElementSibling === reference) return;
+    if (!reference && state.placeholder === gridEl.lastElementChild) return;
+    const before = captureCardRects();
+    gridEl.insertBefore(state.placeholder, reference);
+    playFlip(before);
+  }
+
+  function captureCardRects(): Map<HTMLElement, DOMRect> {
+    const rects = new Map<HTMLElement, DOMRect>();
+    Array.from(gridEl.children).forEach((node) => {
+      if (node instanceof HTMLElement && node.classList.contains("qwb-widget") && !node.classList.contains("qwb-widget--dragging")) {
+        rects.set(node, node.getBoundingClientRect());
+      }
+    });
+    return rects;
+  }
+
+  function playFlip(before: Map<HTMLElement, DOMRect>): void {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    before.forEach((previous, card) => {
+      if (!card.isConnected) return;
+      const next = card.getBoundingClientRect();
+      const dx = previous.left - next.left;
+      const dy = previous.top - next.top;
+      if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
+      card.style.transition = "none";
+      card.style.transform = `translate(${dx}px, ${dy}px)`;
+      void card.offsetWidth;
+      card.style.transition = "transform 220ms cubic-bezier(0.2, 0, 0, 1)";
+      card.style.transform = "";
+      window.setTimeout(() => {
+        card.style.removeProperty("transition");
+        card.style.removeProperty("transform");
+      }, 240);
+    });
+  }
+
+  function orderedItemsFromGrid(current: LayoutItem[]): LayoutItem[] {
+    const byKey = new Map(current.map((item) => [itemKey(item), item]));
+    const visible = Array.from(gridEl.children)
+      .filter((node): node is HTMLElement => node instanceof HTMLElement && node.classList.contains("qwb-widget"))
+      .map((node) => node.dataset.instanceId ?? "")
+      .map((key) => byKey.get(key))
+      .filter((item): item is LayoutItem => Boolean(item));
+    const visibleKeys = new Set(visible.map(itemKey));
+    return [...visible, ...current.filter((item) => !visibleKeys.has(itemKey(item)))];
+  }
+
+  function restoreDraggedCard(card: HTMLElement): void {
+    card.classList.remove("qwb-widget--dragging");
+    for (const property of ["position", "left", "top", "width", "height", "z-index", "pointer-events"]) {
+      card.style.removeProperty(property);
+    }
+  }
+
+  function showResizeBadge(card: HTMLElement, cols: number, rows: number): void {
+    let badge = card.querySelector(".qwb-resize-ratio") as HTMLElement | null;
+    if (!badge) badge = card.createDiv({ cls: "qwb-resize-ratio" });
+    badge.setText(`${cols} × ${rows}`);
+  }
+
+  function gridUnit(): { unit: number; gap: number } {
+    const style = getComputedStyle(gridEl);
+    const gap = parseFloat(style.columnGap) || 12;
+    const unit = Math.max(40, (gridEl.getBoundingClientRect().width - gap * (gridColumnCount - 1)) / gridColumnCount);
+    return { unit, gap };
+  }
+
+  function updateGridMetrics(): void {
+    if (!gridEl || !isDesktop) return;
+    const style = getComputedStyle(gridEl);
+    const gap = parseFloat(style.columnGap) || 12;
+    const width = gridEl.getBoundingClientRect().width;
+    if (width <= 0) return;
+    gridColumnCount = computeOrderedGridColumns(width, gap);
+    const unit = Math.max(40, (width - gap * (gridColumnCount - 1)) / gridColumnCount);
+    gridEl.style.setProperty("--qwb-cols", String(gridColumnCount));
+    gridEl.style.setProperty("--qwb-row-h", `${Math.round(unit)}px`);
+  }
+
+  function cloneItems(source: LayoutItem[]): LayoutItem[] {
+    return source.map((item) => ({ ...item, config: item.config ? structuredClone(item.config) : undefined }));
   }
 
   async function setItemState(instanceId: string, patch: Partial<LayoutItem>): Promise<void> {
@@ -1361,14 +1551,22 @@
     hydrateFocusFilters();
     window.addEventListener("pointermove", pointerMove);
     window.addEventListener("pointerup", pointerUp);
+    window.addEventListener("pointercancel", pointerUp);
     document.addEventListener("pointerdown", handleDocumentPointerDown);
     document.addEventListener("keydown", handleDocumentKeydown);
+    if (isDesktop && gridEl) {
+      gridResizeObserver = new ResizeObserver(updateGridMetrics);
+      gridResizeObserver.observe(gridEl);
+      updateGridMetrics();
+    }
     unsubscribe = controller.subscribe((next) => (snapshot = next));
     return () => {
       window.removeEventListener("pointermove", pointerMove);
       window.removeEventListener("pointerup", pointerUp);
+      window.removeEventListener("pointercancel", pointerUp);
       document.removeEventListener("pointerdown", handleDocumentPointerDown);
       document.removeEventListener("keydown", handleDocumentKeydown);
+      gridResizeObserver?.disconnect();
     };
   });
 
@@ -1425,7 +1623,7 @@
   {#key activeScene}
     <div class="qwb-grid" bind:this={gridEl}>
     {#each items.filter((item) => !item.hidden && enabled(item)) as item (itemKey(item))}
-      <section class:collapsed={item.collapsed} class:editing={layoutEditMode} class="qwb-widget" style={itemStyle(item)}>
+      <section data-instance-id={itemKey(item)} class:collapsed={item.collapsed} class:editing={layoutEditMode} class="qwb-widget" style={itemStyle(item)}>
         <header class="qwb-widget-header">
           {#if layoutEditMode}
             <button class="qwb-drag-handle" aria-label={`移动${widgetTitle(item)}`} on:pointerdown={(event) => beginPointer(event, item, "move")}>

@@ -14,6 +14,49 @@ import {
   createBuiltinWidgetRegistry,
   WidgetRegistry
 } from "../src/core/widget-registry";
+import {
+  computeOrderedGridColumns,
+  migrateLayoutToOrderedGrid,
+  normalizeOrderedItems
+} from "../src/core/ordered-grid";
+
+describe("Xove-compatible ordered grid", () => {
+  it("migrates absolute positions into stable reading order and card spans", () => {
+    const layout = getDefaultLayouts().find((item) => item.id === "today")!;
+    layout.items = [layout.items[3], layout.items[1], layout.items[0], layout.items[2]];
+    const migrated = migrateLayoutToOrderedGrid(layout);
+
+    expect(migrated.items.map((item) => item.presetId ?? item.widgetId)).toEqual([
+      "tasks.today-focus",
+      "capture.memo",
+      "core.quick-create",
+      "projects.recent"
+    ]);
+    expect(migrated.items.map((item) => [item.cols, item.rows])).toEqual([
+      [3, 2],
+      [2, 1],
+      [2, 1],
+      [2, 1]
+    ]);
+    expect(migrated.items.map((item) => [item.x, item.y])).toEqual([[0, 0], [0, 1], [0, 2], [0, 3]]);
+  });
+
+  it("normalizes reordered cards without changing instance content", () => {
+    const layout = migrateLayoutToOrderedGrid(getDefaultLayouts().find((item) => item.id === "today")!);
+    layout.items[0].config = { quick: "today" };
+    const reversed = normalizeOrderedItems([...layout.items].reverse());
+    expect(reversed.map((item) => item.y)).toEqual([0, 1, 2, 3]);
+    expect(reversed.at(-1)?.config).toEqual({ quick: "today" });
+    expect(reversed.at(-1)?.config).not.toBe(layout.items[0].config);
+  });
+
+  it("uses the upstream four-to-one responsive column ladder", () => {
+    expect(computeOrderedGridColumns(1400, 12)).toBe(4);
+    expect(computeOrderedGridColumns(900, 12)).toBe(3);
+    expect(computeOrderedGridColumns(600, 12)).toBe(2);
+    expect(computeOrderedGridColumns(240, 12)).toBe(1);
+  });
+});
 
 describe("default layouts", () => {
   const registry = createBuiltinWidgetRegistry();

@@ -561,8 +561,9 @@
 
 .qwb-grid {
   display: grid;
-  grid-template-columns: repeat(12, minmax(0, 1fr));
-  grid-auto-rows: 64px;
+  grid-template-columns: repeat(var(--qwb-cols, 4), minmax(0, 1fr));
+  grid-auto-rows: var(--qwb-row-h, 280px);
+  grid-auto-flow: row dense;
   gap: var(--qwb-gap);
   align-items: stretch;
 }
@@ -584,6 +585,58 @@
 .qwb-widget.editing {
   border-color: color-mix(in srgb, var(--interactive-accent) 52%, var(--qwb-border));
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--interactive-accent) 8%, transparent);
+}
+
+.qwb-layout-placeholder {
+  min-width: 0;
+  grid-column: span var(--cols, 1);
+  grid-row: span var(--rows, 1);
+  border: 1.5px dashed color-mix(in srgb, var(--interactive-accent) 65%, var(--qwb-border));
+  border-radius: var(--qwb-radius);
+  background:
+    repeating-linear-gradient(
+      -45deg,
+      color-mix(in srgb, var(--interactive-accent) 8%, transparent) 0 8px,
+      transparent 8px 16px
+    );
+  box-shadow: inset 0 0 0 3px color-mix(in srgb, var(--interactive-accent) 5%, transparent);
+}
+
+.qwb-widget--dragging {
+  rotate: 0.8deg;
+  scale: 1.018;
+  opacity: .96;
+  border-color: color-mix(in srgb, var(--interactive-accent) 68%, var(--qwb-border));
+  box-shadow: 0 18px 42px rgb(0 0 0 / 22%);
+}
+
+.qwb-widget--resizing {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 1px;
+  transition: outline-color .12s ease, box-shadow .12s ease;
+}
+
+.qwb-widget--resizing.is-limit {
+  outline-color: var(--color-orange);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-orange) 14%, transparent);
+}
+
+.qwb-resize-ratio {
+  position: absolute;
+  z-index: 8;
+  right: 12px;
+  bottom: 12px;
+  min-width: 48px;
+  padding: 5px 8px;
+  border: 1px solid color-mix(in srgb, var(--interactive-accent) 45%, var(--qwb-border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--background-primary) 88%, transparent);
+  box-shadow: var(--shadow-s);
+  color: var(--text-accent);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  pointer-events: none;
 }
 
 .qwb-widget.collapsed {
@@ -1766,6 +1819,10 @@
 
 @media (prefers-reduced-motion: reduce) {
   .qwb-hero-copy { animation: none; }
+  .qwb-widget,
+  .qwb-widget--dragging,
+  .qwb-layout-placeholder { transition: none !important; }
+  .qwb-widget--dragging { rotate: 0deg; scale: 1; }
 }
 
 /* Independent component library and task/project widget instances */

@@ -57,6 +57,10 @@ export interface LayoutItem {
   y: number;
   width: number;
   height: number;
+  /** Ordered-grid column span. Added by the Xove-compatible layout migration. */
+  cols?: number;
+  /** Ordered-grid row span. Added by the Xove-compatible layout migration. */
+  rows?: number;
   hidden?: boolean;
   collapsed?: boolean;
   config?: Record<string, unknown>;
