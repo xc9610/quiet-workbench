@@ -1,7 +1,8 @@
 import type { LayoutItem, LayoutSchema } from "./types";
 
-export const ORDERED_GRID_VERSION = 1;
+export const ORDERED_GRID_VERSION = 3;
 export const ORDERED_GRID_MAX_SPAN = 4;
+export const ORDERED_GRID_MAX_ROWS = 8;
 
 /**
  * Convert the former twelve-column absolute layout to Xove Dashboard's
@@ -9,7 +10,7 @@ export const ORDERED_GRID_MAX_SPAN = 4;
  * column/row span. The old x/y/width/height values remain on the item for
  * backwards-compatible exports; callers keep a complete pre-migration backup.
  */
-export function migrateLayoutToOrderedGrid(layout: LayoutSchema): LayoutSchema {
+export function migrateLayoutToOrderedGrid(layout: LayoutSchema, remapRows = true): LayoutSchema {
   if (layout.surface !== "workbench") return cloneLayout(layout);
   const ordered = layout.items
     .map((item, index) => ({ item, index }))
@@ -21,14 +22,14 @@ export function migrateLayoutToOrderedGrid(layout: LayoutSchema): LayoutSchema {
       x: 0,
       y: index,
       cols: clampSpan(item.cols ?? legacyWidthToCols(item.width)),
-      rows: clampSpan(item.rows ?? legacyHeightToRows(item.height)),
+      rows: remapRows ? recommendedRows(item) : clampRowSpan(item.rows ?? legacyHeightToRows(item.height)),
       config: item.config ? structuredClone(item.config) : undefined
     }))
   };
 }
 
-export function migrateLayoutsToOrderedGrid(layouts: LayoutSchema[]): LayoutSchema[] {
-  return layouts.map(migrateLayoutToOrderedGrid);
+export function migrateLayoutsToOrderedGrid(layouts: LayoutSchema[], remapRows = true): LayoutSchema[] {
+  return layouts.map((layout) => migrateLayoutToOrderedGrid(layout, remapRows));
 }
 
 export function normalizeOrderedItems(items: LayoutItem[]): LayoutItem[] {
@@ -37,7 +38,7 @@ export function normalizeOrderedItems(items: LayoutItem[]): LayoutItem[] {
     x: 0,
     y: index,
     cols: clampSpan(item.cols ?? legacyWidthToCols(item.width)),
-    rows: clampSpan(item.rows ?? legacyHeightToRows(item.height)),
+    rows: clampRowSpan(item.rows ?? legacyHeightToRows(item.height)),
     config: item.config ? structuredClone(item.config) : undefined
   }));
 }
@@ -47,7 +48,7 @@ export function itemCols(item: LayoutItem, columnCount = ORDERED_GRID_MAX_SPAN):
 }
 
 export function itemRows(item: LayoutItem): number {
-  return clampSpan(item.rows ?? legacyHeightToRows(item.height));
+  return clampRowSpan(item.rows ?? legacyHeightToRows(item.height));
 }
 
 export function clampSpan(value: number, maximum = ORDERED_GRID_MAX_SPAN): number {
@@ -65,7 +66,17 @@ export function legacyWidthToCols(width: number): number {
 }
 
 export function legacyHeightToRows(height: number): number {
-  return clampSpan(Math.ceil(Math.max(1, height) / 6));
+  return clampRowSpan(Math.ceil(Math.max(1, height) / 2));
+}
+
+export function recommendedRows(item: LayoutItem): number {
+  if (["capture.memo", "core.quick-create", "control.actions", "view.heatmap"].includes(item.widgetId)) return 1;
+  return legacyHeightToRows(item.height);
+}
+
+export function clampRowSpan(value: number): number {
+  const rounded = Number.isFinite(value) ? Math.round(value) : 1;
+  return Math.max(1, Math.min(ORDERED_GRID_MAX_ROWS, rounded));
 }
 
 function cloneLayout(layout: LayoutSchema): LayoutSchema {

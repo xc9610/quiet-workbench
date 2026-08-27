@@ -1,7 +1,7 @@
 import type { LayoutItem, LayoutSchema, WorkbenchSurface } from "./types";
 import type { WidgetRegistry } from "./widget-registry";
 import { migrateLegacyWidgetItem } from "./widget-model";
-import { ORDERED_GRID_MAX_SPAN } from "./ordered-grid";
+import { ORDERED_GRID_MAX_ROWS, ORDERED_GRID_MAX_SPAN } from "./ordered-grid";
 
 export interface LayoutValidationIssue {
   path: string;
@@ -34,7 +34,18 @@ const layouts: LayoutSchema[] = [
       { widgetId: "clients.list", x: 0, y: 14, width: 4, height: 4 },
       { widgetId: "suppliers.list", x: 4, y: 14, width: 4, height: 4 },
       { widgetId: "knowledge.inbox", x: 8, y: 14, width: 4, height: 4 },
-      { widgetId: "knowledge.recent", x: 0, y: 18, width: 12, height: 4 }
+      { widgetId: "knowledge.recent", x: 0, y: 18, width: 12, height: 4 },
+      {
+        widgetId: "view.heatmap",
+        instanceId: "view.heatmap-vault-activity-1",
+        title: "笔记活动",
+        presetId: "vault.activity",
+        x: 0,
+        y: 22,
+        width: 12,
+        height: 4,
+        config: activityHeatmapConfig()
+      }
     ]
   },
   {
@@ -89,6 +100,91 @@ const layouts: LayoutSchema[] = [
       { widgetId: "meetings.context", x: 0, y: 17, width: 1, height: 3 },
       { widgetId: "core.quick-create", x: 0, y: 20, width: 1, height: 2 }
     ]
+  },
+  {
+    version: 1,
+    id: "sidebar-workbench",
+    name: "工作台侧栏",
+    surface: "sidebar",
+    items: [
+      { widgetId: "tasks.upcoming", x: 0, y: 0, width: 1, height: 4 },
+      { widgetId: "capture.memo", x: 0, y: 4, width: 1, height: 3 },
+      { widgetId: "core.quick-create", x: 0, y: 7, width: 1, height: 2 }
+    ]
+  },
+  {
+    version: 1,
+    id: "sidebar-task-board",
+    name: "任务看板侧栏",
+    surface: "sidebar",
+    items: [
+      { widgetId: "tasks.upcoming", x: 0, y: 0, width: 1, height: 5 },
+      { widgetId: "capture.memo", x: 0, y: 5, width: 1, height: 3 },
+      { widgetId: "core.quick-create", x: 0, y: 8, width: 1, height: 2 }
+    ]
+  },
+  {
+    version: 1,
+    id: "sidebar-project",
+    name: "项目笔记侧栏",
+    surface: "sidebar",
+    items: [
+      { widgetId: "core.context", x: 0, y: 0, width: 1, height: 3 },
+      { widgetId: "tasks.context", x: 0, y: 3, width: 1, height: 5 },
+      { widgetId: "meetings.context", x: 0, y: 8, width: 1, height: 4 },
+      { widgetId: "projects.context", x: 0, y: 12, width: 1, height: 3 },
+      { widgetId: "core.quick-create", x: 0, y: 15, width: 1, height: 2 }
+    ]
+  },
+  {
+    version: 1,
+    id: "sidebar-client",
+    name: "客户笔记侧栏",
+    surface: "sidebar",
+    items: [
+      { widgetId: "core.context", x: 0, y: 0, width: 1, height: 3 },
+      { widgetId: "projects.context", x: 0, y: 3, width: 1, height: 4 },
+      { widgetId: "tasks.context", x: 0, y: 7, width: 1, height: 4 },
+      { widgetId: "meetings.context", x: 0, y: 11, width: 1, height: 3 },
+      { widgetId: "core.quick-create", x: 0, y: 14, width: 1, height: 2 }
+    ]
+  },
+  {
+    version: 1,
+    id: "sidebar-meeting",
+    name: "会议笔记侧栏",
+    surface: "sidebar",
+    items: [
+      { widgetId: "core.context", x: 0, y: 0, width: 1, height: 3 },
+      { widgetId: "tasks.context", x: 0, y: 3, width: 1, height: 5 },
+      { widgetId: "projects.context", x: 0, y: 8, width: 1, height: 3 },
+      { widgetId: "core.quick-create", x: 0, y: 11, width: 1, height: 2 }
+    ]
+  },
+  {
+    version: 1,
+    id: "sidebar-supplier",
+    name: "供应商笔记侧栏",
+    surface: "sidebar",
+    items: [
+      { widgetId: "core.context", x: 0, y: 0, width: 1, height: 3 },
+      { widgetId: "projects.context", x: 0, y: 3, width: 1, height: 4 },
+      { widgetId: "meetings.context", x: 0, y: 7, width: 1, height: 3 },
+      { widgetId: "capture.memo", x: 0, y: 10, width: 1, height: 3 },
+      { widgetId: "core.quick-create", x: 0, y: 13, width: 1, height: 2 }
+    ]
+  },
+  {
+    version: 1,
+    id: "sidebar-knowledge",
+    name: "知识笔记侧栏",
+    surface: "sidebar",
+    items: [
+      { widgetId: "core.context", x: 0, y: 0, width: 1, height: 3 },
+      { widgetId: "projects.context", x: 0, y: 3, width: 1, height: 4 },
+      { widgetId: "tasks.context", x: 0, y: 7, width: 1, height: 4 },
+      { widgetId: "capture.memo", x: 0, y: 11, width: 1, height: 3 }
+    ]
   }
 ];
 
@@ -108,6 +204,48 @@ export function cloneLayout(layout: LayoutSchema): LayoutSchema {
 
 export function getDefaultLayouts(): LayoutSchema[] {
   return layouts.map((layout) => migrateLayoutWidgets(cloneLayout(layout)));
+}
+
+/** Add newly introduced contextual sidebar layouts without replacing user layouts. */
+export function ensureContextSidebarLayouts(persisted: LayoutSchema[]): LayoutSchema[] {
+  const result = persisted.map(cloneLayout);
+  for (const fallback of layouts.filter((layout) => layout.surface === "sidebar")) {
+    if (!result.some((layout) => layout.id === fallback.id && layout.surface === "sidebar")) {
+      result.push(migrateLayoutWidgets(cloneLayout(fallback)));
+    }
+  }
+  return result;
+}
+
+/** Adds the built-in activity heatmap once without moving or replacing user components. */
+export function ensureActivityHeatmap(persisted: LayoutSchema[]): LayoutSchema[] {
+  return persisted.map((layout) => {
+    const upgraded = cloneLayout(layout);
+    if (upgraded.id !== "workbench" || upgraded.surface !== "workbench") return upgraded;
+    if (upgraded.items.some((item) => item.widgetId === "view.heatmap" || item.presetId === "vault.activity")) return upgraded;
+    const y = upgraded.items.reduce((bottom, item) => Math.max(bottom, item.y + item.height), 0);
+    upgraded.items.push({
+      widgetId: "view.heatmap",
+      instanceId: "view.heatmap-vault-activity-1",
+      title: "笔记活动",
+      presetId: "vault.activity",
+      x: 0,
+      y,
+      width: 12,
+      height: 4,
+      config: activityHeatmapConfig()
+    });
+    return upgraded;
+  });
+}
+
+function activityHeatmapConfig(): Record<string, unknown> {
+  return {
+    source: { kind: "mixed", scopeMode: "all" },
+    query: { limit: 30, includeCompleted: false, metric: "vault-activity" },
+    display: { variant: "year" },
+    actions: []
+  };
 }
 
 /** Adds newly introduced built-in sidebar widgets without discarding user layout changes. */
@@ -268,8 +406,9 @@ export function validateLayout(
       }
       for (const key of ["cols", "rows"] as const) {
         const field = raw[key];
-        if (field !== undefined && (!Number.isInteger(field) || Number(field) < 1 || Number(field) > ORDERED_GRID_MAX_SPAN)) {
-          issues.push({ path: `${path}.${key}`, message: `${key} must be an integer from 1 to ${ORDERED_GRID_MAX_SPAN}` });
+        const maximum = key === "cols" ? ORDERED_GRID_MAX_SPAN : ORDERED_GRID_MAX_ROWS;
+        if (field !== undefined && (!Number.isInteger(field) || Number(field) < 1 || Number(field) > maximum)) {
+          issues.push({ path: `${path}.${key}`, message: `${key} must be an integer from 1 to ${maximum}` });
         }
       }
       for (const key of ["hidden", "collapsed"] as const) {

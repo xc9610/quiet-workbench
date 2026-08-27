@@ -6,6 +6,7 @@
   import { layoutItemKey } from "../core/layout";
   import { EMPTY_SNAPSHOT } from "../ui/controller";
   import { effectiveTaskDate } from "../domain/widget-data";
+  import { resolveSidebarProfile, SIDEBAR_PROFILE_NAMES } from "../core/sidebar-context";
 
   export let controller: WorkbenchController;
   let snapshot: WorkbenchSnapshot = controller.getSnapshot() ?? EMPTY_SNAPSHOT;
@@ -37,8 +38,10 @@
   }
 
   function sidebarItems() {
+    const profile = resolveSidebarProfile(snapshot.context);
+    const layoutId = controller.settings.sidebarProfiles[profile] ?? controller.settings.activeSidebarLayout;
     const layout = controller.settings.layouts.find(
-      (entry) => entry.surface === "sidebar" && entry.id === controller.settings.activeSidebarLayout
+      (entry) => entry.surface === "sidebar" && entry.id === layoutId
     );
     return (layout?.items ?? [])
       .filter((item) => !item.hidden)
@@ -78,6 +81,7 @@
 </script>
 
 <div class="qwb-context">
+  <div class="qwb-context-profile"><span>{SIDEBAR_PROFILE_NAMES[resolveSidebarProfile(snapshot.context)]}</span><small>自动上下文</small></div>
   {#each sidebarItems() as item (layoutItemKey(item))}
     {#if item.widgetId === "core.context"}
       <header class:collapsed={item.collapsed}>

@@ -95,6 +95,20 @@ describe("quick memo content", () => {
     ]);
   });
 
+  it("does not treat the standalone memo file header as a legacy entry", () => {
+    const content = `---
+type: 工作记录
+aliases:
+  - Quiet Workbench 速记
+---
+
+# Quiet Workbench 速记
+
+由 Quiet Workbench 追加分条速记；每条记录自动带本地时间戳。
+`;
+    expect(recentQuickMemoEntries(content)).toEqual([]);
+  });
+
   it("formats local timestamps deterministically", () => {
     const value = new Date(2026, 7, 18, 8, 5);
     expect(quickMemoTimestamp(value)).toEqual({ date: "2026-08-18", time: "08:05" });

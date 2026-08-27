@@ -7,10 +7,11 @@ import {
   TFolder,
   normalizePath
 } from "obsidian";
-import type { EntityKind, EntityRecord, LayoutItem, LayoutSchema, TaskRecord, TransactionReceipt } from "./core/types";
+import type { ActivityDay, ContextSurface, EntityKind, EntityRecord, LayoutItem, LayoutSchema, TaskRecord, TransactionReceipt } from "./core/types";
 import { DiagnosticService, type DiagnosticVaultReader } from "./core/diagnostic";
 import { createBuiltinWidgetRegistry } from "./core/widget-registry";
-import { ensureSingleWorkbenchLayout, getDefaultLayouts, upgradePersistedLayouts, validateLayout } from "./core/layout";
+import { ensureActivityHeatmap, ensureContextSidebarLayouts, ensureSingleWorkbenchLayout, getDefaultLayouts, upgradePersistedLayouts, validateLayout } from "./core/layout";
+import { DEFAULT_SIDEBAR_PROFILES } from "./core/sidebar-context";
 import {
   migrateLayoutToOrderedGrid,
   migrateLayoutsToOrderedGrid,
@@ -65,7 +66,7 @@ interface PersistedPluginData extends Partial<QuietWorkbenchSettings> {
   transactionJournal?: ReturnType<TransactionJournal["serialize"]>;
 }
 
-const CURRENT_SETTINGS_SCHEMA_VERSION = 5;
+const CURRENT_SETTINGS_SCHEMA_VERSION = 6;
 const LEGACY_MEMO_PATH = "40_管理_Management/01_工作_Work/Workbench速记.md";
 const ASTERISM_ICON_ID = "asterism-mark";
 const ASTERISM_ICON_SVG = `
@@ -156,10 +157,11 @@ class PluginWorkbenchController implements WorkbenchController {
       this.index = this.createIndex();
       this.indexSignature = nextSignature;
     }
-    const [update, report, memo] = await Promise.all([
+    const [update, report, memo, activity] = await Promise.all([
       this.index.scan(),
       this.diagnostics.run(this.plugin.settings),
-      this.readQuickMemo()
+      this.readQuickMemo(),
+      this.readActivity()
     ]);
     const diagnostics: DiagnosticItem[] = report.items.map((item) => ({
       id: item.id,
@@ -193,9 +195,10 @@ class PluginWorkbenchController implements WorkbenchController {
       meetings: this.summaries("meeting"),
       knowledge: this.summaries("knowledge"),
       tasks: this.index.listTasks(),
+      activity,
       transactionHistory: this.journal.list(),
       memo,
-      context: this.buildContext(this.current.context.path)
+      context: this.buildContext(this.current.context.path, this.current.context.surface)
     };
     this.emit();
   }
@@ -208,8 +211,8 @@ class PluginWorkbenchController implements WorkbenchController {
     await this.plugin.activateWorkbench();
   }
 
-  async setActivePath(path?: string): Promise<void> {
-    this.current = { ...this.current, context: this.buildContext(path) };
+  async setActivePath(path?: string, surface: ContextSurface = "note"): Promise<void> {
+    this.current = { ...this.current, context: this.buildContext(path, surface) };
     this.emit();
   }
 
@@ -473,8 +476,11 @@ class PluginWorkbenchController implements WorkbenchController {
     return this.index.listEntities(kind).map((entity) => entitySummary(entity));
   }
 
-  private buildContext(path?: string): ContextSnapshot {
-    if (!path) return { title: "未选择笔记", relatedProjects: [], tasks: [], meetings: [] };
+  private buildContext(path?: string, surface: ContextSurface = "note"): ContextSnapshot {
+    if (!path) {
+      const title = surface === "workbench" ? "工作台" : surface === "task-board" ? "任务看板" : "未选择笔记";
+      return { surface, title, relatedProjects: [], tasks: [], meetings: [] };
+    }
     const entity = this.index.getEntity(path);
     const title = entity?.name ?? path.split("/").pop()?.replace(/\.md$/i, "") ?? path;
     const relatedProjects = this.index
@@ -489,6 +495,7 @@ class PluginWorkbenchController implements WorkbenchController {
       .filter((meeting) => meeting.path === path || entityReferences(meeting, entity, path))
       .map(entitySummary);
     return {
+      surface,
       path,
       title,
       kind: entity?.kind,
@@ -497,6 +504,20 @@ class PluginWorkbenchController implements WorkbenchController {
       tasks,
       meetings
     };
+  }
+
+  private async readActivity(): Promise<ActivityDay[]> {
+    const counts = new Map<string, number>();
+    const now = new Date();
+    const cutoff = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 370).getTime();
+    for (const file of await this.vaultPort.listMarkdownFiles("")) {
+      if (file.mtime < cutoff || file.path.split("/").some((segment) => segment.startsWith("."))) continue;
+      const date = localDateKey(file.mtime);
+      counts.set(date, (counts.get(date) ?? 0) + 1);
+    }
+    return [...counts.entries()]
+      .map(([date, count]) => ({ date, count }))
+      .sort((left, right) => left.date.localeCompare(right.date));
   }
 
   private findTask(expected: TaskRecord): TaskRecord {
@@ -589,6 +610,7 @@ export default class QuietWorkbenchPlugin extends Plugin {
   private refreshTimer?: number;
   private startupRefreshTimer?: number;
   private journalData?: PersistedPluginData["transactionJournal"];
+  private lastPrimaryContext: { path?: string; surface: ContextSurface } = { surface: "note" };
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -681,12 +703,12 @@ export default class QuietWorkbenchPlugin extends Plugin {
   private async loadSettings(): Promise<void> {
     const data = (await this.loadData()) as PersistedPluginData | null;
     this.journalData = data?.transactionJournal;
-    const positionedLayouts = ensureSingleWorkbenchLayout(
+    const positionedLayouts = ensureActivityHeatmap(ensureContextSidebarLayouts(ensureSingleWorkbenchLayout(
       upgradePersistedLayouts(data?.layouts?.length ? data.layouts : getDefaultLayouts()),
       data?.activeWorkbenchLayout
-    );
+    )));
     const needsOrderedGridMigration = data?.orderedGridVersion !== ORDERED_GRID_VERSION;
-    const layouts = migrateLayoutsToOrderedGrid(positionedLayouts);
+    const layouts = migrateLayoutsToOrderedGrid(positionedLayouts, needsOrderedGridMigration);
     const legacyPositionedLayouts = needsOrderedGridMigration && data?.layouts?.length
       ? structuredClone(positionedLayouts)
       : structuredClone(data?.legacyPositionedLayouts ?? []);
@@ -704,6 +726,7 @@ export default class QuietWorkbenchPlugin extends Plugin {
         ...data?.hero,
         customCopies: data?.hero?.customCopies ?? DEFAULT_SETTINGS.hero.customCopies
       },
+      sidebarProfiles: { ...DEFAULT_SIDEBAR_PROFILES, ...data?.sidebarProfiles },
       memoPath,
       activeWorkbenchLayout: "workbench",
       layouts,
@@ -720,7 +743,23 @@ export default class QuietWorkbenchPlugin extends Plugin {
   }
 
   private async syncActiveFile(): Promise<void> {
-    await this.requireController().setActivePath(this.app.workspace.getActiveFile()?.path);
+    const viewType = this.app.workspace.activeLeaf?.view.getViewType();
+    if (viewType === CONTEXT_PANEL_VIEW_TYPE) {
+      await this.requireController().setActivePath(this.lastPrimaryContext.path, this.lastPrimaryContext.surface);
+      return;
+    }
+    if (viewType === WORKBENCH_VIEW_TYPE) {
+      this.lastPrimaryContext = { surface: "workbench" };
+      await this.requireController().setActivePath(undefined, this.lastPrimaryContext.surface);
+      return;
+    }
+    if (viewType === TASK_BOARD_VIEW_TYPE) {
+      this.lastPrimaryContext = { surface: "task-board" };
+      await this.requireController().setActivePath(undefined, this.lastPrimaryContext.surface);
+      return;
+    }
+    this.lastPrimaryContext = { path: this.app.workspace.getActiveFile()?.path, surface: "note" };
+    await this.requireController().setActivePath(this.lastPrimaryContext.path, this.lastPrimaryContext.surface);
   }
 
   private scheduleRefresh(file: TAbstractFile): void {
@@ -826,6 +865,14 @@ function parseDate(value?: string): Date | undefined {
   if (!value) return undefined;
   const date = new Date(`${value}T12:00:00`);
   return Number.isNaN(date.getTime()) ? undefined : date;
+}
+
+function localDateKey(value: number | Date): string {
+  const date = value instanceof Date ? value : new Date(value);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function applyEntityContext(content: string, input: CreateEntityInput): string {

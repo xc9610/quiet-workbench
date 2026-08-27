@@ -10,7 +10,7 @@ export class ObsidianVaultAdapter implements VaultPort {
   async listMarkdownFiles(folder: string): Promise<VaultFileInfo[]> {
     return this.vault
       .getMarkdownFiles()
-      .filter((file) => isPathInsideFolder(file.path, folder))
+      .filter((file) => !folder.trim() || isPathInsideFolder(file.path, folder))
       .map((file) => ({ path: file.path, mtime: file.stat.mtime, size: file.stat.size }));
   }
 

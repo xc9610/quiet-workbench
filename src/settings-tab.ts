@@ -2,7 +2,8 @@ import { App, Modal, Notice, PluginSettingTab, Setting, normalizePath } from "ob
 import { validateLayout } from "./core/layout";
 import { createBuiltinWidgetRegistry } from "./core/widget-registry";
 import type { QuietWorkbenchSettings } from "./settings";
-import type { LayoutItem, LayoutSchema } from "./core/types";
+import type { LayoutItem, LayoutSchema, SidebarProfileId } from "./core/types";
+import { SIDEBAR_PROFILE_NAMES } from "./core/sidebar-context";
 import {
   DEFAULT_HERO_COPIES,
   parseHeroCopyLines,
@@ -65,6 +66,8 @@ class WriteConfirmationModal extends Modal {
 }
 
 export class QuietWorkbenchSettingTab extends PluginSettingTab {
+  private sidebarProfile: SidebarProfileId = "workbench";
+
   constructor(app: App, private readonly host: QuietWorkbenchSettingsHost) {
     super(app, host as never);
   }
@@ -233,8 +236,20 @@ export class QuietWorkbenchSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl).setName("侧栏布局").setHeading();
+    new Setting(containerEl)
+      .setName("正在配置")
+      .setDesc("侧栏会根据工作台、任务看板或当前笔记类型自动选择对应配置。")
+      .addDropdown((dropdown) => {
+        for (const [id, label] of Object.entries(SIDEBAR_PROFILE_NAMES)) dropdown.addOption(id, label);
+        dropdown.setValue(this.sidebarProfile).onChange((value) => {
+          this.sidebarProfile = value as SidebarProfileId;
+          this.display();
+        });
+      });
+    const selectedSidebarLayoutId = this.host.settings.sidebarProfiles[this.sidebarProfile]
+      ?? this.host.settings.activeSidebarLayout;
     const activeSidebar = this.host.settings.layouts.find(
-      (layout) => layout.surface === "sidebar" && layout.id === this.host.settings.activeSidebarLayout
+      (layout) => layout.surface === "sidebar" && layout.id === selectedSidebarLayoutId
     );
     if (activeSidebar) {
       containerEl.createEl("p", { text: "常用组件可在这里排序、隐藏、折叠或移除；变更只影响侧栏布局，不会修改笔记。", cls: "setting-item-description" });
@@ -280,6 +295,7 @@ export class QuietWorkbenchSettingTab extends PluginSettingTab {
         const index = this.host.settings.layouts.findIndex((layout) => layout.id === result.layout.id);
         if (index >= 0) this.host.settings.layouts[index] = result.layout;
         else this.host.settings.layouts.push(result.layout);
+        this.host.settings.sidebarProfiles[this.sidebarProfile] = result.layout.id;
         this.host.settings.activeSidebarLayout = result.layout.id;
         await this.host.saveSettings();
         await this.host.refreshWorkbench();

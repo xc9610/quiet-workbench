@@ -7,6 +7,7 @@ export type WidgetTypeId =
   | "view.quadrant"
   | "view.timeline"
   | "view.metrics"
+  | "view.heatmap"
   | "view.detail"
   | "view.relations"
   | "control.selector"
@@ -81,6 +82,7 @@ export const WIDGET_PRESETS: ReadonlyArray<Readonly<WidgetPresetDefinition>> = O
   { id: "tasks.quadrant", title: "任务四象限", description: "重要度和紧急度矩阵", typeId: "view.quadrant", config: config("tasks") },
   { id: "tasks.timeline", title: "任务时间线", description: "按日期连续展示任务", typeId: "view.timeline", config: config("tasks") },
   { id: "tasks.workload", title: "任务工作量", description: "未来七天任务数量", typeId: "view.metrics", config: config("tasks", { query: { metric: "workload" } }) },
+  { id: "vault.activity", title: "笔记活动", description: "最近一年的 Markdown 笔记更新热力图", typeId: "view.heatmap", config: config("mixed", { query: { metric: "vault-activity" }, display: { variant: "year" } }) },
   { id: "projects.list", title: "项目列表", description: "搜索与筛选开放项目", typeId: "view.list", config: config("projects") },
   { id: "projects.recent", title: "最近项目", description: "按最近更新时间显示项目", typeId: "view.list", config: config("projects", { query: { mode: "recent", limit: 10 }, display: { compact: true } }) },
   { id: "projects.risks", title: "项目风险", description: "只显示需要关注的项目", typeId: "view.list", config: config("projects", { query: { mode: "risks" } }) },
@@ -138,6 +140,7 @@ export function defaultConfigForType(typeId: WidgetTypeId): WidgetInstanceConfig
   if (typeId === "control.selector") return config("projects");
   if (typeId === "capture.memo") return config("mixed");
   if (typeId === "view.metrics") return config("tasks", { query: { metric: "workload" } });
+  if (typeId === "view.heatmap") return config("mixed", { query: { metric: "vault-activity" }, display: { variant: "year" } });
   if (typeId === "view.board") return config("tasks", { query: { groupBy: "time" } });
   return config("tasks");
 }

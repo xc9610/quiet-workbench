@@ -81,8 +81,11 @@ function formatListItem(entry: string, time: string): string {
 }
 
 function legacyQuickMemoEntries(content: string, limit: number): QuickMemoEntry[] {
-  return content
+  const normalized = content
     .replace(/\r\n?/gu, "\n")
+    .replace(/^---\n[\s\S]*?\n---\n?/u, "")
+    .replace(/^由\s+(?:Quiet Workbench|Asterism)\s+追加分条速记[^\n]*$/gmu, "");
+  return normalized
     .split(/\n\s*\n/gu)
     .map((entry) => entry.trim())
     .filter((entry) => entry && !/^#{1,2}\s+/u.test(entry))

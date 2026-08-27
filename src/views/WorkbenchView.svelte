@@ -15,12 +15,14 @@
   import { layoutItemKey } from "../core/layout";
   import {
     clampSpan,
+    clampRowSpan,
     computeOrderedGridColumns,
     itemCols,
     itemRows,
     legacyHeightToRows,
     legacyWidthToCols,
-    normalizeOrderedItems
+    normalizeOrderedItems,
+    recommendedRows
   } from "../core/ordered-grid";
   import { BUILTIN_WIDGETS } from "../core/widget-registry";
   import {
@@ -53,13 +55,14 @@
     type TaskTimeBucket
   } from "../domain/widget-data";
   import { selectHeroCopy, type HeroCopy, type HeroCopyContext } from "../core/hero-copy";
+  import { activityStats, buildActivityCalendar } from "../domain/activity";
 
   export let controller: WorkbenchController;
 
   type SceneId = string;
   type DialogKind = "entity" | "task" | "task-edit" | "migrate" | "knowledge" | "yolo-preview" | null;
   type MoveMode = "move" | "resize";
-  const UI_VERSION = "0.6.6";
+  const UI_VERSION = "0.7.0";
 
   interface SceneDefinition {
     id: SceneId;
@@ -559,6 +562,7 @@
       "view.quadrant": "⊞",
       "view.timeline": "↝",
       "view.metrics": "⌁",
+      "view.heatmap": "▦",
       "view.detail": "▤",
       "view.relations": "⌘",
       "control.selector": "⌕",
@@ -586,7 +590,13 @@
       width: Math.min(12, Math.max(3, definition.defaultSize.width)),
       height: Math.max(2, definition.defaultSize.height),
       cols: legacyWidthToCols(definition.defaultSize.width),
-      rows: legacyHeightToRows(definition.defaultSize.height),
+      rows: recommendedRows({
+        widgetId,
+        x: 0,
+        y: 0,
+        width: definition.defaultSize.width,
+        height: definition.defaultSize.height
+      }),
       config: preset
         ? structuredClone(preset.config) as unknown as Record<string, unknown>
         : defaultWidgetConfig(widgetId)
@@ -995,6 +1005,14 @@
     return counts.map((entry) => ({ ...entry, width: Math.round((entry.count / max) * 100) }));
   }
 
+  function activityCalendar() {
+    return buildActivityCalendar(snapshot.activity);
+  }
+
+  function activitySummary() {
+    return activityStats(snapshot.activity);
+  }
+
   function relatedKnowledge(projectPath: string) {
     const project = snapshot.projects.find((entry) => entry.path === projectPath);
     if (!project) return [];
@@ -1161,11 +1179,11 @@
     event: PointerEvent,
     state: Extract<NonNullable<typeof drag>, { kind: "resize" }>
   ): void {
-    const { unit, gap } = gridUnit();
-    const wantedCols = state.startCols + Math.round((event.clientX - state.startX) / Math.max(1, unit + gap));
-    const wantedRows = state.startRows + Math.round((event.clientY - state.startY) / Math.max(1, unit + gap));
+    const { columnUnit, rowUnit, gap } = gridUnit();
+    const wantedCols = state.startCols + Math.round((event.clientX - state.startX) / Math.max(1, columnUnit + gap));
+    const wantedRows = state.startRows + Math.round((event.clientY - state.startY) / Math.max(1, rowUnit + gap));
     const cols = clampSpan(wantedCols, gridColumnCount);
-    const rows = clampSpan(wantedRows);
+    const rows = clampRowSpan(wantedRows);
     state.card.style.setProperty("--cols", String(cols));
     state.card.style.setProperty("--rows", String(rows));
     state.card.style.gridColumn = `span ${cols}`;
@@ -1247,11 +1265,12 @@
     badge.setText(`${cols} × ${rows}`);
   }
 
-  function gridUnit(): { unit: number; gap: number } {
+  function gridUnit(): { columnUnit: number; rowUnit: number; gap: number } {
     const style = getComputedStyle(gridEl);
     const gap = parseFloat(style.columnGap) || 12;
-    const unit = Math.max(40, (gridEl.getBoundingClientRect().width - gap * (gridColumnCount - 1)) / gridColumnCount);
-    return { unit, gap };
+    const columnUnit = Math.max(40, (gridEl.getBoundingClientRect().width - gap * (gridColumnCount - 1)) / gridColumnCount);
+    const rowUnit = Math.max(96, Math.min(144, Math.round(columnUnit * .4)));
+    return { columnUnit, rowUnit, gap };
   }
 
   function updateGridMetrics(): void {
@@ -1261,9 +1280,10 @@
     const width = gridEl.getBoundingClientRect().width;
     if (width <= 0) return;
     gridColumnCount = computeOrderedGridColumns(width, gap);
-    const unit = Math.max(40, (width - gap * (gridColumnCount - 1)) / gridColumnCount);
+    const columnUnit = Math.max(40, (width - gap * (gridColumnCount - 1)) / gridColumnCount);
+    const rowUnit = Math.max(96, Math.min(144, Math.round(columnUnit * .4)));
     gridEl.style.setProperty("--qwb-cols", String(gridColumnCount));
-    gridEl.style.setProperty("--qwb-row-h", `${Math.round(unit)}px`);
+    gridEl.style.setProperty("--qwb-row-h", `${rowUnit}px`);
   }
 
   function cloneItems(source: LayoutItem[]): LayoutItem[] {
@@ -1779,6 +1799,26 @@
             {:else if item.widgetId === "tasks.workload" || (item.widgetId === "view.metrics" && metricKind(item) === "workload")}
               <div class="qwb-workload">
                 {#each workloadDays(item) as day}<div><time>{day.date.slice(5)}</time><span><i style={`width:${day.width}%`}></i></span><strong>{day.count}</strong></div>{/each}
+              </div>
+            {:else if item.widgetId === "view.heatmap"}
+              <div class="qwb-activity-layout">
+                <div class="qwb-activity-summary">
+                  <span><strong>{activitySummary().total}</strong><small>一年内更新</small></span>
+                  <span><strong>{activitySummary().activeDays}</strong><small>活跃天数</small></span>
+                  <span><strong>{activitySummary().currentStreak}</strong><small>当前连续</small></span>
+                  <span><strong>{activitySummary().longestStreak}</strong><small>最长连续</small></span>
+                </div>
+                <div class="qwb-activity-map">
+                  <div class="qwb-activity-scroll" aria-label="最近一年笔记活动热力图">
+                    <div class="qwb-activity-weekdays" aria-hidden="true"><span>一</span><span></span><span>三</span><span></span><span>五</span><span></span><span>日</span></div>
+                    <div class="qwb-activity-grid">
+                      {#each activityCalendar() as cell (cell.date)}
+                        <span class={`level-${cell.level}`} class:out-of-range={!cell.inRange} title={`${cell.date} · ${cell.count} 次更新`} aria-label={`${cell.date}，${cell.count} 次更新`}></span>
+                      {/each}
+                    </div>
+                  </div>
+                  <div class="qwb-activity-legend"><small>少</small>{#each [0, 1, 2, 3, 4] as level}<i class={`level-${level}`}></i>{/each}<small>多</small></div>
+                </div>
               </div>
             {:else if item.widgetId === "tasks.timeline" || (item.widgetId === "view.timeline" && dataSource(item) === "tasks")}
               <div class="qwb-timeline">

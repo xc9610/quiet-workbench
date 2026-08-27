@@ -1,5 +1,6 @@
-import type { LayoutSchema } from "./core/types";
+import type { LayoutSchema, SidebarProfileId } from "./core/types";
 import { DEFAULT_HERO_SETTINGS, type HeroCopySettings } from "./core/hero-copy";
+import { DEFAULT_SIDEBAR_PROFILES } from "./core/sidebar-context";
 
 export interface QuietWorkbenchSettings {
   writesEnabled: boolean;
@@ -17,6 +18,7 @@ export interface QuietWorkbenchSettings {
   hero: HeroCopySettings;
   activeWorkbenchLayout: string;
   activeSidebarLayout: string;
+  sidebarProfiles: Record<SidebarProfileId, string>;
   layouts: LayoutSchema[];
   /** Layout engine marker and reversible snapshot from before ordered-grid migration. */
   orderedGridVersion: number;
@@ -57,6 +59,7 @@ export const DEFAULT_SETTINGS: QuietWorkbenchSettings = {
   hero: structuredClone(DEFAULT_HERO_SETTINGS),
   activeWorkbenchLayout: "workbench",
   activeSidebarLayout: "sidebar-default",
+  sidebarProfiles: { ...DEFAULT_SIDEBAR_PROFILES },
   layouts: [],
   orderedGridVersion: 0,
   legacyPositionedLayouts: [],

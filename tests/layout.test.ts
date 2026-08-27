@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   adaptLayoutForDevice,
+  ensureActivityHeatmap,
+  ensureContextSidebarLayouts,
   ensureSingleWorkbenchLayout,
   getDefaultLayouts,
   importLayout,
@@ -16,6 +18,7 @@ import {
 } from "../src/core/widget-registry";
 import {
   computeOrderedGridColumns,
+  recommendedRows,
   migrateLayoutToOrderedGrid,
   normalizeOrderedItems
 } from "../src/core/ordered-grid";
@@ -33,10 +36,10 @@ describe("Xove-compatible ordered grid", () => {
       "projects.recent"
     ]);
     expect(migrated.items.map((item) => [item.cols, item.rows])).toEqual([
-      [3, 2],
+      [3, 4],
       [2, 1],
       [2, 1],
-      [2, 1]
+      [2, 2]
     ]);
     expect(migrated.items.map((item) => [item.x, item.y])).toEqual([[0, 0], [0, 1], [0, 2], [0, 3]]);
   });
@@ -56,12 +59,18 @@ describe("Xove-compatible ordered grid", () => {
     expect(computeOrderedGridColumns(600, 12)).toBe(2);
     expect(computeOrderedGridColumns(240, 12)).toBe(1);
   });
+
+  it("keeps compact utility widgets to one row", () => {
+    expect(recommendedRows({ widgetId: "capture.memo", x: 0, y: 0, width: 4, height: 3 })).toBe(1);
+    expect(recommendedRows({ widgetId: "control.actions", x: 0, y: 0, width: 4, height: 3 })).toBe(1);
+    expect(recommendedRows({ widgetId: "view.heatmap", x: 0, y: 0, width: 12, height: 4 })).toBe(1);
+  });
 });
 
 describe("default layouts", () => {
   const registry = createBuiltinWidgetRegistry();
 
-  it("provides one primary workbench plus legacy-compatible layouts and one sidebar layout", () => {
+  it("provides one primary workbench plus legacy-compatible layouts and contextual sidebars", () => {
     const defaults = getDefaultLayouts();
     expect(defaults.filter((layout) => layout.surface === "workbench").map((layout) => layout.id)).toEqual([
       "workbench",
@@ -70,9 +79,30 @@ describe("default layouts", () => {
       "knowledge"
     ]);
     expect(defaults.filter((layout) => layout.surface === "sidebar").map((layout) => layout.id)).toEqual([
-      "sidebar-default"
+      "sidebar-default",
+      "sidebar-workbench",
+      "sidebar-task-board",
+      "sidebar-project",
+      "sidebar-client",
+      "sidebar-meeting",
+      "sidebar-supplier",
+      "sidebar-knowledge"
     ]);
     for (const layout of defaults) expect(validateLayout(layout, registry).valid).toBe(true);
+  });
+
+  it("adds new contextual sidebars and heatmap without overwriting customized layouts", () => {
+    const workbench = getDefaultLayouts().find((layout) => layout.id === "workbench")!;
+    workbench.items = workbench.items.filter((item) => item.widgetId !== "view.heatmap");
+    workbench.items[0].title = "我的今日焦点";
+    const sidebar = getDefaultLayouts().find((layout) => layout.id === "sidebar-default")!;
+    sidebar.items[0].collapsed = true;
+    const upgraded = ensureActivityHeatmap(ensureContextSidebarLayouts([workbench, sidebar]));
+    expect(upgraded.filter((layout) => layout.surface === "sidebar")).toHaveLength(8);
+    expect(upgraded.find((layout) => layout.id === "sidebar-default")?.items[0].collapsed).toBe(true);
+    expect(upgraded.find((layout) => layout.id === "workbench")?.items[0].title).toBe("我的今日焦点");
+    expect(upgraded.find((layout) => layout.id === "workbench")?.items.filter((item) => item.widgetId === "view.heatmap")).toHaveLength(1);
+    expect(ensureActivityHeatmap(upgraded)).toEqual(upgraded);
   });
 
   it("returns defensive copies", () => {

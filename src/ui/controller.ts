@@ -1,4 +1,6 @@
 import type {
+  ActivityDay,
+  ContextSurface,
   EntityKind,
   LayoutItem,
   TaskRecord,
@@ -44,6 +46,7 @@ export interface QuickMemoSnapshot {
 }
 
 export interface ContextSnapshot {
+  surface: ContextSurface;
   path?: string;
   title: string;
   kind?: EntityKind;
@@ -62,6 +65,7 @@ export interface WorkbenchSnapshot {
   meetings: EntitySummary[];
   knowledge: EntitySummary[];
   tasks: TaskRecord[];
+  activity: ActivityDay[];
   transactionHistory: TransactionReceipt[];
   memo: QuickMemoSnapshot;
   context: ContextSnapshot;
@@ -91,7 +95,7 @@ export interface WorkbenchController {
   refresh(): Promise<void>;
   openWorkbench(): Promise<void>;
   openTaskBoard(): Promise<void>;
-  setActivePath(path?: string): Promise<void>;
+  setActivePath(path?: string, surface?: ContextSurface): Promise<void>;
   openPath(path: string): Promise<void>;
   createEntity(input: CreateEntityInput): Promise<TransactionReceipt>;
   previewEntity(input: CreateEntityInput): Promise<{ path: string; content: string }>;
@@ -123,9 +127,11 @@ export const EMPTY_SNAPSHOT: WorkbenchSnapshot = {
   meetings: [],
   knowledge: [],
   tasks: [],
+  activity: [],
   transactionHistory: [],
   memo: { path: "", exists: false, recent: [] },
   context: {
+    surface: "note",
     title: "未选择笔记",
     relatedProjects: [],
     tasks: [],

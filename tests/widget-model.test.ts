@@ -36,6 +36,10 @@ describe("generic widget model", () => {
     expect(presetsForType("control.actions").map((preset) => preset.id)).toEqual(expect.arrayContaining(["meetings.actions-control", "suppliers.actions-control"]));
   });
 
+  it("provides a reusable vault activity heatmap preset", () => {
+    expect(presetsForType("view.heatmap").map((preset) => preset.id)).toEqual(["vault.activity"]);
+  });
+
   it("migrates a legacy functional widget without changing its geometry", () => {
     const migrated = migrateLegacyWidgetItem({
       widgetId: "tasks.waiting",

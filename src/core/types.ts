@@ -1,6 +1,8 @@
 export type EntityKind = "project" | "client" | "supplier" | "meeting" | "knowledge";
 export type TaskScope = "project" | "client" | "meeting-draft";
 export type WorkbenchSurface = "workbench" | "sidebar";
+export type ContextSurface = "note" | "workbench" | "task-board";
+export type SidebarProfileId = "workbench" | "task-board" | "project" | "client" | "supplier" | "meeting" | "knowledge" | "note";
 export type TransactionStatus =
   | "planned"
   | "preflight"
@@ -34,6 +36,11 @@ export interface TaskRecord {
   revision: string;
   /** A meeting action that already has a durable Asterism migration receipt. */
   migrated?: boolean;
+}
+
+export interface ActivityDay {
+  date: string;
+  count: number;
 }
 
 export interface WidgetDefinition {
