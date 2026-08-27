@@ -1,8 +1,8 @@
 {
   "name": "quiet-workbench",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "private": true,
-  "description": "A local-first project, task, meeting and knowledge workbench for Obsidian.",
+  "description": "A local-first, modular personal workspace for Obsidian.",
   "type": "module",
   "engines": {
     "node": ">=22 <23",

@@ -30,7 +30,7 @@ class WriteConfirmationModal extends Modal {
   onOpen(): void {
     const { contentEl } = this;
     contentEl.addClass("qwb-confirm-modal");
-    contentEl.createEl("h2", { text: "启用 Quiet Workbench 写入" });
+    contentEl.createEl("h2", { text: "启用 Asterism 写入" });
     contentEl.createEl("p", {
       text: "启用后，插件可以按照已配置的目录和模板创建或修改 Markdown 文件。写入前仍会执行冲突检查，并记录可撤销的事务。"
     });
@@ -86,7 +86,7 @@ export class QuietWorkbenchSettingTab extends PluginSettingTab {
           this.host.settings.writesEnabled = value;
           await this.host.saveSettings();
           await this.host.refreshWorkbench();
-          new Notice(value ? "Quiet Workbench 写入已启用" : "Quiet Workbench 已切换为只读模式");
+          new Notice(value ? "Asterism 写入已启用" : "Asterism 已切换为只读模式");
           this.display();
         })
       );
@@ -99,7 +99,7 @@ export class QuietWorkbenchSettingTab extends PluginSettingTab {
           button.setDisabled(true);
           await this.host.refreshWorkbench();
           button.setDisabled(false);
-          new Notice("诊断完成，请在 Workbench 中查看结果");
+          new Notice("诊断完成，请在 Asterism 工作台中查看结果");
         })
       );
 
@@ -242,7 +242,7 @@ export class QuietWorkbenchSettingTab extends PluginSettingTab {
     const privacy = containerEl.createDiv({ cls: "qwb-settings-note" });
     privacy.createEl("strong", { text: "本地优先" });
     privacy.createEl("p", {
-      text: "Quiet Workbench 首版不联网、不收集遥测，也不会调用第三方插件的非公开接口。Dataview、Tasks、Templater 与 Full Calendar 仅作为可选增强。"
+      text: "Asterism 不联网、不收集遥测，也不会调用第三方插件的非公开接口。Dataview、Tasks、Templater 与 Full Calendar 仅作为可选增强。"
     });
   }
 

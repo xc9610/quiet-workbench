@@ -17,11 +17,11 @@ export class WorkbenchItemView extends ItemView {
   }
 
   getDisplayText(): string {
-    return "Quiet Workbench";
+    return "Asterism 工作台";
   }
 
   getIcon(): string {
-    return "layout-dashboard";
+    return "asterism-mark";
   }
 
   usesController(controller: WorkbenchController): boolean {

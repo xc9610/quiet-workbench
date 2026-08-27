@@ -17,7 +17,7 @@ export class TaskBoardItemView extends ItemView {
   }
 
   getDisplayText(): string {
-    return "Quiet Workbench 任务看板";
+    return "Asterism 任务看板";
   }
 
   getIcon(): string {

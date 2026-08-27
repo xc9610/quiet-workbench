@@ -49,7 +49,7 @@
   type SceneId = string;
   type DialogKind = "entity" | "task" | "task-edit" | "migrate" | "knowledge" | "yolo-preview" | null;
   type MoveMode = "move" | "resize";
-  const UI_VERSION = "0.6.1";
+  const UI_VERSION = "0.6.2";
 
   interface SceneDefinition {
     id: SceneId;
@@ -429,7 +429,7 @@
   async function openFocusYolo(item: LayoutItem): Promise<void> {
     const rows = visibleFocusTasks(item);
     const prompt = [
-      "请协助我处理以下 Quiet Workbench 今日焦点。先分析和给出编号建议，不要直接修改文件：",
+      "请协助我处理以下 Asterism 今日焦点。先分析和给出编号建议，不要直接修改文件：",
       ...rows.map((task, index) => `${index + 1}. [${scopeLabel(task.scope)}] ${task.text}（${focusDate(task)}，来源：${task.sourceName}）`)
     ].join("\n");
     yoloPrompt = prompt;
@@ -456,7 +456,7 @@
 
   async function openMemoYolo(): Promise<void> {
     const prompt = [
-      "请整理当前 Quiet Workbench 速记文件中今天尚未处理的分条记录。",
+      "请整理当前 Asterism 速记文件中今天尚未处理的分条记录。",
       "先在对话中分类并给出预览，不要直接修改文件：",
       "1. 可执行任务：说明建议归属的项目或客户、日期和优先级。",
       "2. 日记内容：整理成保留原意的简短段落。",
@@ -1337,7 +1337,7 @@
 <div class:layout-editing={layoutEditMode} class="qwb-shell" data-scene={activeScene}>
   <header class="qwb-header">
     <div>
-      <div class="qwb-eyebrow">QUIET WORKBENCH · {UI_VERSION}</div>
+      <div class="qwb-eyebrow">ASTERISM · 星序 · {UI_VERSION}</div>
       <h1>工作台</h1>
       <p>自由添加、组合和调整组件</p>
     </div>
@@ -1470,7 +1470,7 @@
               <div class="qwb-widget-search"><input value={widgetSearch[itemKey(item)] ?? ""} placeholder="搜索任务" on:input={(event) => (widgetSearch = { ...widgetSearch, [itemKey(item)]: (event.currentTarget as HTMLInputElement).value })} /><span>{scopedTasks(item).length}</span></div>
               <div class="qwb-task-list">
                 {#each taskRowsForWidget(item) as task (task.id)}
-                  <div class="qwb-task-row"><input type="checkbox" checked={task.completed} disabled={!controller.settings.writesEnabled || busy || task.scope === "meeting-draft"} on:change={(event) => run(() => controller.updateTask(task, { completed: (event.currentTarget as HTMLInputElement).checked }), "任务状态已更新")} /><button class="qwb-link" on:click={() => controller.openPath(task.path)}>{task.text}<small>{scopeLabel(task.scope)} · {task.sourceName}</small></button><time>{effectiveTaskDate(task) ?? "未安排"}</time>{#if task.scope === "meeting-draft"}<button class="qwb-row-action" disabled={!controller.settings.writesEnabled} on:click={() => openMigration(task)}>迁移</button>{:else}<button class="qwb-row-action" on:click={() => openTaskEdit(task)}>编辑</button>{/if}</div>
+                  <div class="qwb-task-row"><input type="checkbox" checked={task.completed} disabled={!controller.settings.writesEnabled || busy || task.scope === "meeting-draft"} on:change={(event) => run(() => controller.updateTask(task, { completed: (event.currentTarget as HTMLInputElement).checked }), "任务状态已更新")} /><button class="qwb-link" title={task.text} on:click={() => controller.openPath(task.path)}><span class="qwb-task-title-text">{task.text}</span></button><div class="qwb-task-meta"><span class="qwb-task-source" title={`${scopeLabel(task.scope)} · ${task.sourceName}`}><b>{scopeLabel(task.scope)}</b><em>{task.sourceName}</em></span><time>{effectiveTaskDate(task) ?? "未安排"}</time>{#if task.priority && task.priority !== "normal"}<span class:high={task.priority === "highest" || task.priority === "high"} class="qwb-task-priority">{priorityLabel(task.priority)}</span>{/if}</div>{#if task.scope === "meeting-draft"}<button class="qwb-row-action" disabled={!controller.settings.writesEnabled} on:click={() => openMigration(task)}>迁移</button>{:else}<button class="qwb-row-action" on:click={() => openTaskEdit(task)}>编辑</button>{/if}</div>
                 {:else}<p class="qwb-empty">当前组件范围内没有任务。</p>{/each}
               </div>
               {#if queryMode(item) !== "client-actions"}<button class="qwb-text-action" on:click={() => openTask(scopedProjectPath(item))}>＋ 添加项目任务</button>{/if}
@@ -1540,10 +1540,10 @@
               </div>
             {:else if ["tasks.inbox", "tasks.waiting", "tasks.week", "tasks.recurring", "projects.waiting"].includes(item.widgetId)}
               <div class="qwb-task-list">
-                {#each taskRowsForWidget(item) as task (task.id)}<div class="qwb-task-row"><input type="checkbox" checked={task.completed} disabled={!controller.settings.writesEnabled || task.scope === "meeting-draft"} on:change={(event) => run(() => controller.updateTask(task, { completed: (event.currentTarget as HTMLInputElement).checked }), "任务状态已更新")} /><button class="qwb-link" on:click={() => controller.openPath(task.path)}>{task.text}<small>{task.sourceName}</small></button><time>{effectiveTaskDate(task) ?? ""}</time>{#if task.scope === "meeting-draft"}<button class="qwb-row-action" on:click={() => openMigration(task)}>迁移</button>{/if}</div>{:else}<p class="qwb-empty">当前没有符合条件的任务。</p>{/each}
+                {#each taskRowsForWidget(item) as task (task.id)}<div class="qwb-task-row"><input type="checkbox" checked={task.completed} disabled={!controller.settings.writesEnabled || task.scope === "meeting-draft"} on:change={(event) => run(() => controller.updateTask(task, { completed: (event.currentTarget as HTMLInputElement).checked }), "任务状态已更新")} /><button class="qwb-link" title={task.text} on:click={() => controller.openPath(task.path)}><span class="qwb-task-title-text">{task.text}</span></button><div class="qwb-task-meta"><span class="qwb-task-source" title={task.sourceName}><em>{task.sourceName}</em></span>{#if effectiveTaskDate(task)}<time>{effectiveTaskDate(task)}</time>{/if}{#if task.priority && task.priority !== "normal"}<span class:high={task.priority === "highest" || task.priority === "high"} class="qwb-task-priority">{priorityLabel(task.priority)}</span>{/if}</div>{#if task.scope === "meeting-draft"}<button class="qwb-row-action" on:click={() => openMigration(task)}>迁移</button>{/if}</div>{:else}<p class="qwb-empty">当前没有符合条件的任务。</p>{/each}
               </div>
             {:else if item.widgetId.startsWith("tasks.")}
-              <div class="qwb-task-list">{#each scopedTasks(item) as task (task.id)}<div class="qwb-task-row"><input type="checkbox" checked={task.completed} disabled={!controller.settings.writesEnabled || task.scope === "meeting-draft"} on:change={(event) => run(() => controller.updateTask(task, { completed: (event.currentTarget as HTMLInputElement).checked }), "任务状态已更新")} /><button class="qwb-link" on:click={() => controller.openPath(task.path)}>{task.text}<small>{task.sourceName}</small></button><time>{effectiveTaskDate(task) ?? ""}</time><button class="qwb-row-action" on:click={() => openTaskEdit(task)}>编辑</button></div>{:else}<p class="qwb-empty">暂无任务。</p>{/each}</div>
+              <div class="qwb-task-list">{#each scopedTasks(item) as task (task.id)}<div class="qwb-task-row"><input type="checkbox" checked={task.completed} disabled={!controller.settings.writesEnabled || task.scope === "meeting-draft"} on:change={(event) => run(() => controller.updateTask(task, { completed: (event.currentTarget as HTMLInputElement).checked }), "任务状态已更新")} /><button class="qwb-link" title={task.text} on:click={() => controller.openPath(task.path)}><span class="qwb-task-title-text">{task.text}</span></button><div class="qwb-task-meta"><span class="qwb-task-source" title={task.sourceName}><em>{task.sourceName}</em></span>{#if effectiveTaskDate(task)}<time>{effectiveTaskDate(task)}</time>{/if}{#if task.priority && task.priority !== "normal"}<span class:high={task.priority === "highest" || task.priority === "high"} class="qwb-task-priority">{priorityLabel(task.priority)}</span>{/if}</div><button class="qwb-row-action" on:click={() => openTaskEdit(task)}>编辑</button></div>{:else}<p class="qwb-empty">暂无任务。</p>{/each}</div>
               <button class="qwb-text-action" on:click={() => openTask(scopedProjectPath(item))}>＋ 添加项目任务</button>
             {:else if item.widgetId === "capture.memo"}
               <div class="qwb-memo-compose">
@@ -1632,7 +1632,7 @@
                 {#each selectedProject(item) ? [selectedProject(item)!] : [] as project}<p class="qwb-widget-hint">{project.name}的相关会议</p><div class="qwb-entity-list compact">{#each meetingsForProject(project.path) as meeting}<button on:click={() => controller.openPath(meeting.path)}><span class="qwb-entity-icon meeting">M</span><span><strong>{meeting.name}</strong><small>{meeting.due || meeting.status || "会议记录"}</small></span><i>›</i></button>{:else}<p class="qwb-empty">暂无关联会议。</p>{/each}</div><button class="qwb-text-action" on:click={() => openCreate("meeting", project.path)}>＋ 创建会议</button>{:else}<p class="qwb-empty">请选择或配置项目。</p>{/each}
               {/if}
             {:else if item.widgetId === "projects.actions" || (item.widgetId === "view.list" && queryMode(item) === "meeting-actions")}
-              <div class="qwb-task-list">{#each scopedTasks(item).filter((task) => task.scope === "meeting-draft") as task (task.id)}<div class="qwb-task-row"><button class="qwb-link" on:click={() => controller.openPath(task.path)}>{task.text}<small>{task.sourceName}</small></button><time>{task.due || ""}</time><button class="qwb-row-action" disabled={!controller.settings.writesEnabled} on:click={() => openMigration(task)}>迁移</button></div>{:else}<p class="qwb-empty">没有待迁移的会议行动。</p>{/each}</div>{#if scopedTasks(item).some((task) => task.scope === "meeting-draft")}<button class="qwb-text-action" on:click={() => openMigration()}>批量迁移全部会议行动</button>{/if}
+              <div class="qwb-task-list">{#each scopedTasks(item).filter((task) => task.scope === "meeting-draft") as task (task.id)}<div class="qwb-task-row qwb-task-row-no-check"><button class="qwb-link" title={task.text} on:click={() => controller.openPath(task.path)}><span class="qwb-task-title-text">{task.text}</span></button><div class="qwb-task-meta"><span class="qwb-task-source" title={task.sourceName}><em>{task.sourceName}</em></span>{#if task.due}<time>{task.due}</time>{/if}</div><button class="qwb-row-action" disabled={!controller.settings.writesEnabled} on:click={() => openMigration(task)}>迁移</button></div>{:else}<p class="qwb-empty">没有待迁移的会议行动。</p>{/each}</div>{#if scopedTasks(item).some((task) => task.scope === "meeting-draft")}<button class="qwb-text-action" on:click={() => openMigration()}>批量迁移全部会议行动</button>{/if}
             {:else if item.widgetId === "projects.risks" || (item.widgetId === "view.list" && dataSource(item) === "projects" && queryMode(item) === "risks")}
               <div class="qwb-risk-list">{#each scopedProjects(item).filter((project) => projectHealth(project).level !== "healthy") as project}<button on:click={() => controller.openPath(project.path)}><strong>{project.name}</strong><span>{#each projectHealth(project).reasons as reason}<small>{reason}</small>{:else}<small>项目信息不足，暂时无法判断。</small>{/each}</span><em class={projectHealth(project).level}>{healthLabel(projectHealth(project).level)}</em></button>{:else}<p class="qwb-empty">当前没有识别到项目风险。</p>{/each}</div>
             {:else if item.widgetId === "projects.activity" || (item.widgetId === "view.timeline" && queryMode(item) === "project-activity")}
@@ -1678,7 +1678,7 @@
             {:else if item.widgetId.startsWith("meetings.")}
               <div class="qwb-scope-section">
                 <div class="qwb-section-title"><span class="qwb-scope meeting">待迁移行动项</span><strong>{tasksByScope("meeting-draft").length}</strong></div>
-                {#each tasksByScope("meeting-draft").slice(0, 6) as task}<div class="qwb-task-row"><button class="qwb-link" on:click={() => controller.openPath(task.path)}>{task.text}</button>{#if task.due}<time>{task.due}</time>{/if}<button class="qwb-row-action" disabled={!controller.settings.writesEnabled} on:click={() => openMigration(task)}>迁移</button></div>{/each}
+                {#each tasksByScope("meeting-draft").slice(0, 6) as task}<div class="qwb-task-row qwb-task-row-no-check"><button class="qwb-link" title={task.text} on:click={() => controller.openPath(task.path)}><span class="qwb-task-title-text">{task.text}</span></button><div class="qwb-task-meta"><span class="qwb-task-source" title={task.sourceName}><em>{task.sourceName}</em></span>{#if task.due}<time>{task.due}</time>{/if}</div><button class="qwb-row-action" disabled={!controller.settings.writesEnabled} on:click={() => openMigration(task)}>迁移</button></div>{/each}
               </div>
               <div class="qwb-entity-list compact">
                 {#each snapshot.meetings.slice(0, 8) as meeting}

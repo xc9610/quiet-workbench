@@ -1,4 +1,5 @@
 import {
+  addIcon,
   Notice,
   Plugin,
   TAbstractFile,
@@ -60,6 +61,13 @@ interface PersistedPluginData extends Partial<QuietWorkbenchSettings> {
 
 const CURRENT_SETTINGS_SCHEMA_VERSION = 2;
 const LEGACY_MEMO_PATH = "40_管理_Management/01_工作_Work/Workbench速记.md";
+const ASTERISM_ICON_ID = "asterism-mark";
+const ASTERISM_ICON_SVG = `
+  <path d="M6.4 2.6 7.45 5.45 10.3 6.5 7.45 7.55 6.4 10.4 5.35 7.55 2.5 6.5 5.35 5.45Z" fill="currentColor" stroke="none" />
+  <path d="M17.7 3.1 18.45 5.15 20.5 5.9 18.45 6.65 17.7 8.7 16.95 6.65 14.9 5.9 16.95 5.15Z" fill="currentColor" stroke="none" />
+  <path d="M15.15 12.2 16.45 15.65 19.9 16.95 16.45 18.25 15.15 21.7 13.85 18.25 10.4 16.95 13.85 15.65Z" fill="currentColor" stroke="none" />
+  <path d="M8.35 8.45 12.65 13.35M16.95 8.55 15.95 12.65" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" opacity="0.72" />
+`;
 
 class ObsidianDiagnosticReader implements DiagnosticVaultReader {
   constructor(private readonly vault: VaultPort) {}
@@ -104,7 +112,7 @@ class PluginWorkbenchController implements WorkbenchController {
       try {
         this.journal.hydrate(journalData);
       } catch (error) {
-        console.warn("Quiet Workbench: ignored invalid transaction journal", error);
+        console.warn("Asterism: ignored invalid transaction journal", error);
       }
     }
     this.transactions = new WriteTransactionExecutor(this.vaultPort, this.journal, {
@@ -304,7 +312,7 @@ class PluginWorkbenchController implements WorkbenchController {
   async appendQuickMemo(text: string): Promise<TransactionReceipt> {
     this.requireWrites();
     const configuredPath = this.plugin.settings.memoPath.trim();
-    if (!configuredPath) throw new Error("请先在 Quiet Workbench 设置中配置速记文件。");
+    if (!configuredPath) throw new Error("请先在 Asterism 设置中配置速记文件。");
     const path = normalizeVaultPath(configuredPath);
     const entry = normalizeQuickMemoEntry(text);
     const exists = await this.vaultPort.exists(path);
@@ -527,9 +535,9 @@ class PluginWorkbenchController implements WorkbenchController {
   }
 
   private requireWrites(): void {
-    if (this.disposed) throw new Error("Quiet Workbench 已重载，请关闭当前旧页面后重新打开。");
+    if (this.disposed) throw new Error("Asterism 已重载，请关闭当前旧页面后重新打开。");
     if (!this.plugin.settings.writesEnabled) {
-      throw new Error("当前为只读诊断模式。请先在 Quiet Workbench 设置中明确启用写入。");
+      throw new Error("当前为只读诊断模式。请先在 Asterism 设置中明确启用写入。");
     }
   }
 
@@ -571,6 +579,7 @@ export default class QuietWorkbenchPlugin extends Plugin {
 
   async onload(): Promise<void> {
     await this.loadSettings();
+    addIcon(ASTERISM_ICON_ID, ASTERISM_ICON_SVG);
     this.controller = new PluginWorkbenchController(this, this.journalData);
 
     this.registerView(WORKBENCH_VIEW_TYPE, (leaf) => new WorkbenchItemView(leaf, this.requireController()));
@@ -578,7 +587,7 @@ export default class QuietWorkbenchPlugin extends Plugin {
     this.registerView(CONTEXT_PANEL_VIEW_TYPE, (leaf) => new ContextPanelView(leaf, this.requireController()));
     this.addSettingTab(new QuietWorkbenchSettingTab(this.app, this));
 
-    this.addRibbonIcon("layout-dashboard", "打开 Quiet Workbench", () => void this.activateWorkbench());
+    this.addRibbonIcon(ASTERISM_ICON_ID, "打开 Asterism 工作台", () => void this.activateWorkbench());
     this.addRibbonIcon("list-todo", "打开任务看板", () => void this.activateTaskBoard());
     this.addCommand({ id: "open-workbench", name: "打开工作台", callback: () => void this.activateWorkbench() });
     this.addCommand({ id: "open-task-board", name: "打开任务看板", callback: () => void this.activateTaskBoard() });
@@ -586,7 +595,7 @@ export default class QuietWorkbenchPlugin extends Plugin {
     this.addCommand({ id: "refresh-workbench", name: "刷新索引并运行诊断", callback: () => void this.refreshWorkbench() });
     this.addCommand({
       id: "undo-last-transaction",
-      name: "撤销最近一次 Workbench 写入",
+      name: "撤销最近一次业务写入",
       callback: () => void this.requireController().undoLastTransaction().catch((error) => new Notice(errorMessage(error)))
     });
 
@@ -604,7 +613,7 @@ export default class QuietWorkbenchPlugin extends Plugin {
       void this.rebindStaleViews().then(() => Promise.all([
         this.refreshWorkbench(),
         this.syncActiveFile()
-      ])).catch((error) => console.error("Quiet Workbench view rebind failed", error));
+      ])).catch((error) => console.error("Asterism view rebind failed", error));
       this.startupRefreshTimer = window.setTimeout(() => void this.refreshWorkbench(), 800);
     });
   }
@@ -642,8 +651,8 @@ export default class QuietWorkbenchPlugin extends Plugin {
     try {
       await this.requireController().refresh();
     } catch (error) {
-      console.error("Quiet Workbench refresh failed", error);
-      new Notice(`Quiet Workbench 刷新失败：${errorMessage(error)}`);
+      console.error("Asterism refresh failed", error);
+      new Notice(`Asterism 刷新失败：${errorMessage(error)}`);
     }
   }
 
@@ -722,7 +731,7 @@ export default class QuietWorkbenchPlugin extends Plugin {
   }
 
   private requireController(): PluginWorkbenchController {
-    if (!this.controller) throw new Error("Quiet Workbench 尚未初始化。");
+    if (!this.controller) throw new Error("Asterism 尚未初始化。");
     return this.controller;
   }
 }

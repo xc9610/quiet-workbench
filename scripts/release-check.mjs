@@ -35,11 +35,11 @@ if (expectedTag && expectedTag !== manifest.version) {
 }
 
 if (errors.length > 0) {
-  console.error("Quiet Workbench release check failed:");
+  console.error(`${manifest.name} release check failed:`);
   for (const error of errors) console.error(`- ${error}`);
   process.exitCode = 1;
 } else {
-  console.log(`Quiet Workbench ${manifest.version} release files are ready.`);
+  console.log(`${manifest.name} ${manifest.version} release files are ready.`);
   console.log(`Tag: ${manifest.version} (without a leading v)`);
   console.log(`Minimum Obsidian version: ${manifest.minAppVersion}`);
 }

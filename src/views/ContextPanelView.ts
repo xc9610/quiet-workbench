@@ -17,7 +17,7 @@ export class ContextPanelView extends ItemView {
   }
 
   getDisplayText(): string {
-    return "Workbench 上下文";
+    return "Asterism 上下文";
   }
 
   getIcon(): string {

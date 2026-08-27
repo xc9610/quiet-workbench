@@ -32,7 +32,7 @@ export interface TaskRecord {
   blockId?: string;
   sourceName: string;
   revision: string;
-  /** A meeting action that already has a durable Quiet Workbench migration receipt. */
+  /** A meeting action that already has a durable Asterism migration receipt. */
   migrated?: boolean;
 }
 

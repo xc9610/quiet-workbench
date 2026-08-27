@@ -1,8 +1,8 @@
-# Quiet Workbench
+# Asterism · 星序
 
-Quiet Workbench is a local-first Obsidian plugin for managing projects, tasks,
-clients, suppliers, meetings, and knowledge without moving business data out of
-Markdown files.
+Asterism is a local-first Obsidian workspace that turns projects, tasks, clients,
+suppliers, meetings, and knowledge into a freely composed personal constellation
+without moving business data out of Markdown files.
 
 ## Safety model
 
@@ -19,7 +19,7 @@ Run `pnpm install && pnpm verify`, then copy `main.js`, `manifest.json`, and
 
 ## 使用流程
 
-1. 在 Obsidian 的「第三方插件」中启用 Quiet Workbench。
+1. 在 Obsidian 的「第三方插件」中启用 Asterism。
 2. 先运行命令「刷新索引并运行诊断」；初始状态不会写入业务笔记。
 3. 用 Ribbon 图标打开完整工作台，用命令「打开上下文侧栏」打开右侧面板。
 4. 核对目录、模板和字段别名后，在插件设置中二次确认启用写入。
@@ -55,7 +55,7 @@ Run `pnpm install && pnpm verify`, then copy `main.js`, `manifest.json`, and
 项目类型、客户、优先级和完成状态组合筛选。客户筛选使用可搜索、多选的选择器；
 筛选条件只保存在布局配置中，不写入业务 Markdown。
 
-「速记」使用独立的 `Quiet Workbench 速记.md`。每次输入会作为独立条目，
+「速记」继续使用独立的 `Quiet Workbench 速记.md`，以兼容已有数据和设置。每次输入会作为独立条目，
 按本地日期分组并自动增加 `HH:mm` 时间戳；旧的无时间戳速记仍可读取。内容追加到设置中
 配置的 Markdown 文件，走同一套冲突检查、事务回执和撤销机制。YOLO 按钮是可选增强：
 可以从速记组件直接打开对应的 Markdown 文件；YOLO 按钮会打开当前速记并复制安全整理说明，

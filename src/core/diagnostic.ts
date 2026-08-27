@@ -63,7 +63,7 @@ export class DiagnosticService {
         category: "optional-plugin",
         status: "info",
         title: plugin.title,
-        detail: enabled ? "已启用，可提供可选增强" : "未启用；Quiet Workbench 核心功能仍可运行"
+        detail: enabled ? "已启用，可提供可选增强" : "未启用；Asterism 核心功能仍可运行"
       });
     }
 
