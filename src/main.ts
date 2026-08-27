@@ -59,7 +59,7 @@ interface PersistedPluginData extends Partial<QuietWorkbenchSettings> {
   transactionJournal?: ReturnType<TransactionJournal["serialize"]>;
 }
 
-const CURRENT_SETTINGS_SCHEMA_VERSION = 3;
+const CURRENT_SETTINGS_SCHEMA_VERSION = 4;
 const LEGACY_MEMO_PATH = "40_管理_Management/01_工作_Work/Workbench速记.md";
 const ASTERISM_ICON_ID = "asterism-mark";
 const ASTERISM_ICON_SVG = `
@@ -687,6 +687,11 @@ export default class QuietWorkbenchPlugin extends Plugin {
       templates: normalizeTemplatePaths({ ...DEFAULT_SETTINGS.templates, ...data?.templates }),
       clientAliases: { ...DEFAULT_SETTINGS.clientAliases, ...data?.clientAliases },
       enabledPacks: { ...DEFAULT_SETTINGS.enabledPacks, ...data?.enabledPacks },
+      hero: {
+        ...DEFAULT_SETTINGS.hero,
+        ...data?.hero,
+        customCopies: data?.hero?.customCopies ?? DEFAULT_SETTINGS.hero.customCopies
+      },
       memoPath,
       activeWorkbenchLayout: "workbench",
       layouts

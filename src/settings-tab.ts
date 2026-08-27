@@ -3,6 +3,12 @@ import { validateLayout } from "./core/layout";
 import { createBuiltinWidgetRegistry } from "./core/widget-registry";
 import type { QuietWorkbenchSettings } from "./settings";
 import type { LayoutItem, LayoutSchema } from "./core/types";
+import {
+  DEFAULT_HERO_COPIES,
+  parseHeroCopyLines,
+  serializeHeroCopies,
+  type HeroCopyMode
+} from "./core/hero-copy";
 
 const SIDEBAR_COMPONENTS = [
   ["core.context", "当前笔记"],
@@ -103,6 +109,46 @@ export class QuietWorkbenchSettingTab extends PluginSettingTab {
           new Notice("诊断完成，请在 Asterism 工作台中查看结果");
         })
       );
+
+    new Setting(containerEl).setName("首页摘要").setHeading();
+    new Setting(containerEl)
+      .setName("Hero 文案模式")
+      .setDesc("每日轮换在同一天保持稳定；状态感知会根据待办情况选择文案；自定义从下方文案库轮换。")
+      .addDropdown((dropdown) => dropdown
+        .addOption("daily", "每日轮换")
+        .addOption("contextual", "状态感知")
+        .addOption("custom", "自定义文案库")
+        .setValue(this.host.settings.hero.mode)
+        .onChange(async (value) => {
+          this.host.settings.hero.mode = value as HeroCopyMode;
+          await this.host.saveSettings();
+          await this.host.refreshWorkbench();
+        }));
+
+    let heroCopyDraft = serializeHeroCopies(
+      this.host.settings.hero.customCopies.length ? this.host.settings.hero.customCopies : DEFAULT_HERO_COPIES
+    );
+    new Setting(containerEl)
+      .setName("自定义 Hero 文案")
+      .setDesc("每行一组，格式为“标题｜副标题”。保存后在自定义模式下按日期轮换；至少保留一组有效文案。")
+      .addTextArea((area) => {
+        area.setPlaceholder("今天，继续推进｜先看清下一步，再把分散的信息带回项目。")
+          .setValue(heroCopyDraft)
+          .onChange((value) => { heroCopyDraft = value; });
+        area.inputEl.rows = 7;
+        area.inputEl.cols = 56;
+      })
+      .addButton((button) => button.setButtonText("保存文案库").onClick(async () => {
+        const copies = parseHeroCopyLines(heroCopyDraft);
+        if (!copies.length) {
+          new Notice("没有有效文案；请使用“标题｜副标题”格式");
+          return;
+        }
+        this.host.settings.hero.customCopies = copies;
+        await this.host.saveSettings();
+        await this.host.refreshWorkbench();
+        new Notice(`已保存 ${copies.length} 组 Hero 文案`);
+      }));
 
     new Setting(containerEl).setName("业务目录").setHeading();
     this.addPathSetting(containerEl, "项目目录", "projectFolder");

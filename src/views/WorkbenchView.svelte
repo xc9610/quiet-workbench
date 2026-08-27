@@ -43,13 +43,14 @@
     type TaskQuadrant,
     type TaskTimeBucket
   } from "../domain/widget-data";
+  import { selectHeroCopy, type HeroCopy, type HeroCopyContext } from "../core/hero-copy";
 
   export let controller: WorkbenchController;
 
   type SceneId = string;
   type DialogKind = "entity" | "task" | "task-edit" | "migrate" | "knowledge" | "yolo-preview" | null;
   type MoveMode = "move" | "resize";
-  const UI_VERSION = "0.6.3";
+  const UI_VERSION = "0.6.4";
 
   interface SceneDefinition {
     id: SceneId;
@@ -174,8 +175,18 @@
       }
     | undefined;
   let heroMetrics: Array<{ label: string; value: number; note: string; tone: "danger" | "accent" | "normal" }> = [];
+  let heroContext: HeroCopyContext = { overdue: 0, dueToday: 0, upcoming: 0, missingNext: 0 };
+  let heroCopy: HeroCopy = { title: "今天，继续推进", subtitle: "先看清下一步，再把分散的信息带回项目。" };
+  let heroStatus: { label: string; tone: "enabled" | "readonly" | "error" } = { label: "只读诊断", tone: "readonly" };
 
-  $: heroMetrics = buildHeroMetrics(snapshot);
+  $: heroContext = buildHeroContext(snapshot);
+  $: heroMetrics = buildHeroMetrics(heroContext);
+  $: heroCopy = selectHeroCopy(controller.settings.hero, formatDate(new Date(), "YYYY-MM-DD"), heroContext);
+  $: heroStatus = snapshot.diagnostics.some((item) => item.status === "error")
+    ? { label: "诊断异常", tone: "error" }
+    : controller.settings.writesEnabled
+      ? { label: "写入已启用", tone: "enabled" }
+      : { label: "只读诊断", tone: "readonly" };
 
   const widgetTitles: Record<string, string> = {
     ...Object.fromEntries(BUILTIN_WIDGETS.map((widget) => [widget.id, widget.title])),
@@ -214,22 +225,26 @@
     return item.title || getWidgetPreset(item.presetId)?.title || widgetTitles[item.widgetId] || item.widgetId;
   }
 
-  function buildHeroMetrics(current: WorkbenchSnapshot): Array<{ label: string; value: number; note: string; tone: "danger" | "accent" | "normal" }> {
+  function buildHeroContext(current: WorkbenchSnapshot): HeroCopyContext {
     const today = formatDate(new Date(), "YYYY-MM-DD");
     const weekEnd = dateAfter(today, 7);
     const tasks = current.tasks.filter((task) => !task.completed && !task.migrated);
     const overdue = tasks.filter((task) => effectiveTaskDate(task) && effectiveTaskDate(task)! < today).length;
     const dueToday = tasks.filter((task) => effectiveTaskDate(task) === today).length;
-    const coming = tasks.filter((task) => {
+    const upcoming = tasks.filter((task) => {
       const date = effectiveTaskDate(task);
       return Boolean(date && date > today && date <= weekEnd);
     }).length;
     const missingNext = current.projects.filter((project) => !project.detail?.trim()).length;
+    return { overdue, dueToday, upcoming, missingNext };
+  }
+
+  function buildHeroMetrics(context: HeroCopyContext): Array<{ label: string; value: number; note: string; tone: "danger" | "accent" | "normal" }> {
     return [
-      { label: "逾期任务", value: overdue, note: "overdue", tone: "danger" },
-      { label: "今天到期", value: dueToday, note: "due today", tone: "accent" },
-      { label: "未来 7 天", value: coming, note: "upcoming", tone: "normal" },
-      { label: "缺少下一步", value: missingNext, note: "next action", tone: missingNext ? "danger" : "normal" }
+      { label: "逾期任务", value: context.overdue, note: "overdue", tone: "danger" },
+      { label: "今天到期", value: context.dueToday, note: "due today", tone: "accent" },
+      { label: "未来 7 天", value: context.upcoming, note: "upcoming", tone: "normal" },
+      { label: "缺少下一步", value: context.missingNext, note: "next action", tone: context.missingNext ? "danger" : "normal" }
     ];
   }
 
@@ -1364,15 +1379,17 @@
   <header class="qwb-hero">
     <div class="qwb-hero-topline"><span>ASTERISM · 星序 · {UI_VERSION}</span><time>{heroDate()}</time></div>
     <div class="qwb-hero-main">
-      <div class="qwb-hero-copy">
-        <span>每日总览</span>
-        <h1>今天，继续推进</h1>
-        <p>先看清下一步，再把分散的信息带回项目。</p>
-      </div>
+      {#key `${heroCopy.title}|${heroCopy.subtitle}`}
+        <div class="qwb-hero-copy">
+          <span>每日总览</span>
+          <h1>{heroCopy.title}</h1>
+          <p>{heroCopy.subtitle}</p>
+        </div>
+      {/key}
       <div class="qwb-header-actions">
-        <span class:enabled={controller.settings.writesEnabled} class="qwb-write-state"><span class="qwb-state-dot"></span>{controller.settings.writesEnabled ? "写入已启用" : "只读诊断"}</span>
         <button class="qwb-button qwb-button-primary" on:click={() => controller.openTaskBoard()}>任务看板</button>
-        <button class:active={layoutEditMode} class="qwb-button qwb-layout-mode-button" aria-pressed={layoutEditMode} on:click={() => (layoutEditMode = !layoutEditMode)}>{layoutEditMode ? "完成编辑" : "编辑布局"}</button>
+        <span class:enabled={heroStatus.tone === "enabled"} class:error={heroStatus.tone === "error"} class="qwb-hero-status" role="status" aria-label={heroStatus.label} title={heroStatus.label}><span class="qwb-state-dot"></span></span>
+        <button use:obsidianIcon={layoutEditMode ? "check" : "layout-dashboard"} class:active={layoutEditMode} class="qwb-icon-button" aria-label={layoutEditMode ? "完成布局编辑" : "编辑布局"} title={layoutEditMode ? "完成编辑" : "编辑布局"} aria-pressed={layoutEditMode} on:click={() => (layoutEditMode = !layoutEditMode)}></button>
         <button use:obsidianIcon={"refresh-cw"} class="qwb-icon-button" aria-label="刷新工作台" title="刷新" disabled={busy} on:click={() => run(() => controller.refresh(), "已刷新")}></button>
         <button use:obsidianIcon={"rotate-ccw"} class="qwb-icon-button" aria-label="撤销最近一次业务写入" title="撤销业务写入" disabled={busy} on:click={() => run(() => controller.undoLastTransaction(), "已撤销最近一次操作")}></button>
       </div>

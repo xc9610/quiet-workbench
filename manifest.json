@@ -1,7 +1,7 @@
 {
   "id": "quiet-workbench",
   "name": "Asterism",
-  "version": "0.6.3",
+  "version": "0.6.4",
   "minAppVersion": "1.8.0",
   "description": "Arrange projects, tasks, meetings, clients and knowledge in a local-first personal workspace.",
   "author": "xuc",

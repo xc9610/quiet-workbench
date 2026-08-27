@@ -53,6 +53,15 @@
   font-size: 11px;
 }
 
+.qwb-hero-copy {
+  animation: qwb-hero-copy-in .24s ease-out;
+}
+
+@keyframes qwb-hero-copy-in {
+  from { opacity: 0; transform: translateY(3px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 .qwb-eyebrow {
   margin-bottom: 5px;
   color: var(--text-accent);
@@ -183,16 +192,10 @@
   color: var(--text-muted);
 }
 
-.qwb-layout-mode-button {
-  border-color: color-mix(in srgb, var(--interactive-accent) 34%, var(--qwb-border));
-  background: var(--background-secondary);
-  color: var(--text-muted);
-}
-
-.qwb-layout-mode-button.active {
+.qwb-icon-button.active {
   border-color: var(--interactive-accent);
-  background: var(--interactive-accent);
-  color: var(--text-on-accent);
+  background: var(--qwb-accent-soft);
+  color: var(--text-accent);
 }
 
 .qwb-icon-button {
@@ -204,6 +207,25 @@
 .qwb-icon-button svg {
   width: 16px;
   height: 16px;
+}
+
+.qwb-hero-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 32px;
+  flex: 0 0 20px;
+}
+
+.qwb-hero-status.enabled .qwb-state-dot {
+  background: var(--color-green);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-green) 14%, transparent);
+}
+
+.qwb-hero-status.error .qwb-state-dot {
+  background: var(--text-error);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--text-error) 14%, transparent);
 }
 
 .qwb-full {
@@ -1637,9 +1659,7 @@
     flex-wrap: wrap;
   }
 
-  .qwb-header-actions .qwb-write-state {
-    margin-right: auto;
-  }
+  .qwb-header-actions .qwb-hero-status { margin-left: 2px; }
 
   .qwb-safety-banner {
     align-items: flex-start;
@@ -1689,6 +1709,10 @@
     inset: 0;
     place-items: center;
   }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .qwb-hero-copy { animation: none; }
 }
 
 /* Independent component library and task/project widget instances */

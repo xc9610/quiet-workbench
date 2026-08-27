@@ -1,4 +1,5 @@
 import type { LayoutSchema } from "./core/types";
+import { DEFAULT_HERO_SETTINGS, type HeroCopySettings } from "./core/hero-copy";
 
 export interface QuietWorkbenchSettings {
   writesEnabled: boolean;
@@ -13,6 +14,7 @@ export interface QuietWorkbenchSettings {
   templates: Record<"project" | "client" | "meeting" | "supplier", string>;
   clientAliases: Record<string, string[]>;
   enabledPacks: Record<string, boolean>;
+  hero: HeroCopySettings;
   activeWorkbenchLayout: string;
   activeSidebarLayout: string;
   layouts: LayoutSchema[];
@@ -49,6 +51,7 @@ export const DEFAULT_SETTINGS: QuietWorkbenchSettings = {
     tasks: true,
     knowledge: true
   },
+  hero: structuredClone(DEFAULT_HERO_SETTINGS),
   activeWorkbenchLayout: "workbench",
   activeSidebarLayout: "sidebar-default",
   layouts: [],
