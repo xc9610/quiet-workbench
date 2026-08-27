@@ -62,7 +62,7 @@
   type SceneId = string;
   type DialogKind = "entity" | "task" | "task-edit" | "migrate" | "knowledge" | "yolo-preview" | null;
   type MoveMode = "move" | "resize";
-  const UI_VERSION = "0.7.0";
+  const UI_VERSION = "0.7.1";
 
   interface SceneDefinition {
     id: SceneId;
@@ -165,6 +165,7 @@
   let widgetLibrarySearch = "";
   let widgetLibraryPack: "all" | "view" | "control" | "capture" = "all";
   let selectedWidgetType = "";
+  let visibleWidgetLibraryItems = BUILTIN_WIDGETS.filter(() => true);
   let editingWidget: LayoutItem | undefined;
   let editingConfig: Record<string, unknown> = {};
   let editingTitle = "";
@@ -217,6 +218,14 @@
     : controller.settings.writesEnabled
       ? { label: "写入已启用", tone: "enabled" }
       : { label: "只读诊断", tone: "readonly" };
+  $: visibleWidgetLibraryItems = BUILTIN_WIDGETS
+    .filter((widget) => widget.surfaces.includes("workbench"))
+    .filter((widget) => widget.showInLibrary !== false)
+    .filter((widget) => widgetLibraryPack === "all" || widget.libraryCategory === widgetLibraryPack)
+    .filter((widget) => {
+      const query = widgetLibrarySearch.trim().toLocaleLowerCase("zh-CN");
+      return !query || `${widget.title} ${widget.description ?? ""} ${widget.id}`.toLocaleLowerCase("zh-CN").includes(query);
+    });
 
   const widgetTitles: Record<string, string> = {
     ...Object.fromEntries(BUILTIN_WIDGETS.map((widget) => [widget.id, widget.title])),
@@ -545,30 +554,27 @@
     dialog = null;
   }
 
-  function widgetLibraryItems() {
-    const query = widgetLibrarySearch.trim().toLocaleLowerCase("zh-CN");
-    return BUILTIN_WIDGETS
-      .filter((widget) => widget.surfaces.includes("workbench"))
-      .filter((widget) => widget.showInLibrary !== false)
-      .filter((widget) => widgetLibraryPack === "all" || widget.libraryCategory === widgetLibraryPack)
-      .filter((widget) => !query || `${widget.title} ${widget.description ?? ""} ${widget.id}`.toLocaleLowerCase("zh-CN").includes(query));
+  function widgetTypeIconName(id: string): string {
+    return {
+      "view.list": "list",
+      "view.board": "columns-3",
+      "view.calendar": "calendar",
+      "view.quadrant": "grid-2x2",
+      "view.timeline": "clock-3",
+      "view.metrics": "gauge",
+      "view.heatmap": "activity",
+      "view.detail": "file-text",
+      "view.relations": "git-fork",
+      "control.selector": "mouse-pointer-2",
+      "control.actions": "zap",
+      "capture.memo": "notebook-pen"
+    }[id] ?? "asterism-mark";
   }
 
-  function widgetTypeIcon(id: string): string {
-    return {
-      "view.list": "☷",
-      "view.board": "▥",
-      "view.calendar": "▦",
-      "view.quadrant": "⊞",
-      "view.timeline": "↝",
-      "view.metrics": "⌁",
-      "view.heatmap": "▦",
-      "view.detail": "▤",
-      "view.relations": "⌘",
-      "control.selector": "⌕",
-      "control.actions": "⚡",
-      "capture.memo": "✎"
-    }[id] ?? "◇";
+  function heroStatusIcon(): string {
+    if (heroStatus.tone === "error") return "alert-triangle";
+    if (heroStatus.tone === "enabled") return "check";
+    return "eye";
   }
 
   function nextWidgetY(): number {
@@ -1596,6 +1602,7 @@
 <div class:layout-editing={layoutEditMode} class="qwb-shell" data-scene={activeScene}>
   <header class="qwb-hero">
     <div class="qwb-hero-topline"><span>ASTERISM · 星序 · {UI_VERSION}</span><time>{heroDate()}</time></div>
+    <div class="qwb-hero-symbol" aria-hidden="true"><span use:obsidianIcon={"asterism-mark"}></span><i use:obsidianIcon={"sparkles"}></i></div>
     <div class="qwb-hero-main">
       {#key `${heroCopy.title}|${heroCopy.subtitle}`}
         <div class="qwb-hero-copy">
@@ -1605,8 +1612,9 @@
         </div>
       {/key}
       <div class="qwb-header-actions" role="toolbar" aria-label="工作台操作">
-        <button class="qwb-hero-action qwb-hero-action-wide" title="打开任务看板" on:click={() => controller.openTaskBoard()}><span use:obsidianIcon={"list-todo"}></span><span>任务看板</span></button>
-        <span class:enabled={heroStatus.tone === "enabled"} class:error={heroStatus.tone === "error"} class="qwb-hero-action qwb-hero-status" role="status" aria-label={heroStatus.label} title={heroStatus.label}><span class="qwb-state-dot"></span></span>
+        <button use:obsidianIcon={"list-todo"} class="qwb-hero-action" aria-label="打开任务看板" title="任务看板" on:click={() => controller.openTaskBoard()}></button>
+        <span use:obsidianIcon={heroStatusIcon()} class:enabled={heroStatus.tone === "enabled"} class:error={heroStatus.tone === "error"} class="qwb-hero-action qwb-hero-status" role="status" aria-label={heroStatus.label} title={heroStatus.label}></span>
+        <button use:obsidianIcon={"pencil"} class="qwb-hero-action" aria-label="编辑 Hero 文案" title="编辑 Hero 文案" on:click={() => controller.openPluginSettings()}></button>
         <button use:obsidianIcon={layoutEditMode ? "check" : "layout-dashboard"} class:active={layoutEditMode} class="qwb-hero-action" aria-label={layoutEditMode ? "完成布局编辑" : "编辑布局"} title={layoutEditMode ? "完成编辑" : "编辑布局"} aria-pressed={layoutEditMode} on:click={() => (layoutEditMode = !layoutEditMode)}></button>
         <button use:obsidianIcon={"refresh-cw"} class="qwb-hero-action" aria-label="刷新工作台" title="刷新" disabled={busy} on:click={() => run(() => controller.refresh(), "已刷新")}></button>
         <button use:obsidianIcon={"rotate-ccw"} class="qwb-hero-action" aria-label="撤销最近一次业务写入" title="撤销业务写入" disabled={busy} on:click={() => run(() => controller.undoLastTransaction(), "已撤销最近一次操作")}></button>
@@ -2055,16 +2063,17 @@
         <input class="qwb-library-search" bind:value={widgetLibrarySearch} placeholder="搜索列表、看板、日历等组件类型" />
         <nav class="qwb-library-packs"><button class:active={widgetLibraryPack === "all"} on:click={() => (widgetLibraryPack = "all")}>全部</button><button class:active={widgetLibraryPack === "view"} on:click={() => (widgetLibraryPack = "view")}>视图</button><button class:active={widgetLibraryPack === "control"} on:click={() => (widgetLibraryPack = "control")}>控制</button><button class:active={widgetLibraryPack === "capture"} on:click={() => (widgetLibraryPack = "capture")}>记录</button></nav>
         <div class="qwb-library-grid qwb-library-types">
-          {#each widgetLibraryItems() as widget (widget.id)}
-            <button on:click={() => (selectedWidgetType = widget.id)}><i>{widgetTypeIcon(widget.id)}</i><span><strong>{widget.title}</strong><small>{widget.description || widget.id}</small></span><em>{widget.defaultSize.width}×{widget.defaultSize.height}</em></button>
+          {#each visibleWidgetLibraryItems as widget (widget.id)}
+            <button on:click={() => (selectedWidgetType = widget.id)}><i use:obsidianIcon={widgetTypeIconName(widget.id)}></i><span><strong>{widget.title}</strong><small>{widget.description || widget.id}</small></span><em>{widget.defaultSize.width}×{widget.defaultSize.height}</em></button>
           {:else}<p class="qwb-empty">没有匹配组件类型。</p>{/each}
         </div>
       {:else}
         <button class="qwb-library-back" on:click={() => (selectedWidgetType = "")}>← 返回组件类型</button>
+        {#if selectedWidgetType === "control.selector"}<p class="qwb-library-explainer"><strong>选择器是联动控制器。</strong>它发布一个共享项目、客户、会议或供应商；设置为“跟随同类选择器”的摘要、健康度、任务与会议组件会一起切换。</p>{/if}
         <div class="qwb-library-grid qwb-library-presets">
-          <button on:click={() => run(() => addWidget(selectedWidgetType), "已添加空白组件")}><i>{widgetTypeIcon(selectedWidgetType)}</i><span><strong>空白组件</strong><small>从默认数据源开始，自行配置名称和筛选。</small></span><em>自定义</em></button>
+          <button on:click={() => run(() => addWidget(selectedWidgetType), "已添加空白组件")}><i use:obsidianIcon={widgetTypeIconName(selectedWidgetType)}></i><span><strong>空白组件</strong><small>从默认数据源开始，自行配置名称和筛选。</small></span><em>自定义</em></button>
           {#each presetsForType(selectedWidgetType) as preset (preset.id)}
-            <button on:click={() => run(() => addWidget(selectedWidgetType, preset.id), `已添加「${preset.title}」`)}><i>{widgetTypeIcon(selectedWidgetType)}</i><span><strong>{preset.title}</strong><small>{preset.description}</small></span><em>预设</em></button>
+            <button on:click={() => run(() => addWidget(selectedWidgetType, preset.id), `已添加「${preset.title}」`)}><i use:obsidianIcon={widgetTypeIconName(selectedWidgetType)}></i><span><strong>{preset.title}</strong><small>{preset.description}</small></span><em>预设</em></button>
           {/each}
         </div>
       {/if}

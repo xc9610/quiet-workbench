@@ -97,7 +97,7 @@ export const WIDGET_PRESETS: ReadonlyArray<Readonly<WidgetPresetDefinition>> = O
   { id: "projects.progress", title: "项目进度", description: "任务完成率和逾期数量", typeId: "view.metrics", config: config("projects", { source: { kind: "projects", scopeMode: "shared" }, query: { metric: "progress" } }) },
   { id: "projects.summary", title: "项目摘要", description: "一个项目的核心信息", typeId: "view.detail", config: config("projects", { source: { kind: "projects", scopeMode: "shared" } }) },
   { id: "projects.relations", title: "项目关系", description: "客户、会议和知识关联", typeId: "view.relations", config: config("projects", { source: { kind: "projects", scopeMode: "shared" } }) },
-  { id: "projects.selector", title: "项目选择器", description: "搜索并发布共享项目", typeId: "control.selector", config: config("projects") },
+  { id: "projects.selector", title: "项目选择器", description: "选择共享项目，联动摘要、健康度、任务与会议", typeId: "control.selector", config: config("projects") },
   { id: "projects.actions-control", title: "项目快捷操作", description: "项目、任务、会议和 YOLO 操作", typeId: "control.actions", config: config("projects", { source: { kind: "projects", scopeMode: "shared" }, actions: ["create-project", "create-task", "create-meeting", "open", "yolo"] }) },
   { id: "clients.list", title: "客户列表", description: "搜索并筛选全部客户", typeId: "view.list", config: config("clients") },
   { id: "clients.followups", title: "待跟进客户", description: "按跟进日期显示逾期和近期客户", typeId: "view.list", config: config("clients", { query: { mode: "followups" } }) },

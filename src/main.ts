@@ -211,6 +211,14 @@ class PluginWorkbenchController implements WorkbenchController {
     await this.plugin.activateWorkbench();
   }
 
+  async openPluginSettings(): Promise<void> {
+    const app = this.plugin.app as typeof this.plugin.app & {
+      setting: { open(): void; openTabById(id: string): void };
+    };
+    app.setting.open();
+    app.setting.openTabById(this.plugin.manifest.id);
+  }
+
   async setActivePath(path?: string, surface: ContextSurface = "note"): Promise<void> {
     this.current = { ...this.current, context: this.buildContext(path, surface) };
     this.emit();

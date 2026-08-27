@@ -95,6 +95,7 @@ export interface WorkbenchController {
   refresh(): Promise<void>;
   openWorkbench(): Promise<void>;
   openTaskBoard(): Promise<void>;
+  openPluginSettings(): Promise<void>;
   setActivePath(path?: string, surface?: ContextSurface): Promise<void>;
   openPath(path: string): Promise<void>;
   createEntity(input: CreateEntityInput): Promise<TransactionReceipt>;

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
+  import { setIcon } from "obsidian";
   import type { TaskRecord } from "../core/types";
   import { formatDate } from "../services/template-service";
   import type { WorkbenchController, WorkbenchSnapshot } from "../ui/controller";
@@ -35,6 +36,15 @@
 
   function scopeLabel(scope: TaskRecord["scope"]): string {
     return { project: "项目", client: "客户", "meeting-draft": "会议" }[scope];
+  }
+
+  function scopeIcon(scope: TaskRecord["scope"]): string {
+    return { project: "folder", client: "users", "meeting-draft": "calendar" }[scope];
+  }
+
+  function obsidianIcon(node: HTMLElement, name: string) {
+    setIcon(node, name);
+    return { update(next: string) { setIcon(node, next); } };
   }
 
   function sidebarItems() {
@@ -81,7 +91,7 @@
 </script>
 
 <div class="qwb-context">
-  <div class="qwb-context-profile"><span>{SIDEBAR_PROFILE_NAMES[resolveSidebarProfile(snapshot.context)]}</span><small>自动上下文</small></div>
+  <div class="qwb-context-profile"><span><i use:obsidianIcon={"panel-right"}></i>{SIDEBAR_PROFILE_NAMES[resolveSidebarProfile(snapshot.context)]}</span><small>自动上下文</small></div>
   {#each sidebarItems() as item (layoutItemKey(item))}
     {#if item.widgetId === "core.context"}
       <header class:collapsed={item.collapsed}>
@@ -92,12 +102,12 @@
       </header>
     {:else if item.widgetId === "tasks.upcoming"}
       <section class:collapsed={item.collapsed}>
-        <div class="qwb-section-title"><h3>近期待办</h3><strong>{upcoming.length}</strong></div>
-        {#if !item.collapsed}{#each upcoming as task}<button class:overdue={isOverdue(task)} class="qwb-context-row" on:click={() => controller.openPath(task.path)}><i class={task.scope}></i><span><small>{scopeLabel(task.scope)} · {task.sourceName}</small>{task.text}</span>{#if effectiveTaskDate(task)}<time>{effectiveTaskDate(task)}</time>{/if}</button>{:else}<p class="qwb-empty">未来 7 天没有已标记日期的待办。</p>{/each}{/if}
+        <div class="qwb-section-title"><h3><i use:obsidianIcon={"list-checks"}></i>近期待办</h3><strong>{upcoming.length}</strong></div>
+        {#if !item.collapsed}{#each upcoming as task}<button class:overdue={isOverdue(task)} class="qwb-context-row" on:click={() => controller.openPath(task.path)}><i class={task.scope} use:obsidianIcon={scopeIcon(task.scope)}></i><span><small>{scopeLabel(task.scope)} · {task.sourceName}</small>{task.text}</span>{#if effectiveTaskDate(task)}<time>{effectiveTaskDate(task)}</time>{/if}</button>{:else}<p class="qwb-empty">未来 7 天没有已标记日期的待办。</p>{/each}{/if}
       </section>
     {:else if item.widgetId === "capture.memo"}
       <section class:collapsed={item.collapsed}>
-        <div class="qwb-section-title"><h3>速记</h3><button class="qwb-context-text-action" disabled={!snapshot.memo.exists} on:click={() => controller.openPath(snapshot.memo.path)}>打开文件</button></div>
+        <div class="qwb-section-title"><h3><i use:obsidianIcon={"notebook-pen"}></i>速记</h3><button class="qwb-context-text-action" disabled={!snapshot.memo.exists} on:click={() => controller.openPath(snapshot.memo.path)}>打开文件</button></div>
         {#if !item.collapsed}
           <div class="qwb-context-memo">
             <textarea bind:value={memoDraft} rows="3" placeholder="记下一条；自动添加时间。" on:keydown={handleMemoKeydown}></textarea>
@@ -107,23 +117,23 @@
       </section>
     {:else if item.widgetId === "tasks.context"}
       <section class:collapsed={item.collapsed}>
-        <div class="qwb-section-title"><h3>相关任务</h3><strong>{snapshot.context.tasks.length}</strong></div>
-        {#if !item.collapsed}{#each snapshot.context.tasks.slice(0, 8) as task}<button class="qwb-context-row" on:click={() => controller.openPath(task.path)}><i class={task.scope}></i><span>{task.text}</span>{#if task.due}<time>{task.due}</time>{/if}</button>{:else}<p class="qwb-empty">当前笔记没有关联任务。</p>{/each}{/if}
+        <div class="qwb-section-title"><h3><i use:obsidianIcon={"check-square"}></i>相关任务</h3><strong>{snapshot.context.tasks.length}</strong></div>
+        {#if !item.collapsed}{#each snapshot.context.tasks.slice(0, 8) as task}<button class="qwb-context-row" on:click={() => controller.openPath(task.path)}><i class={task.scope} use:obsidianIcon={scopeIcon(task.scope)}></i><span>{task.text}</span>{#if task.due}<time>{task.due}</time>{/if}</button>{:else}<p class="qwb-empty">当前笔记没有关联任务。</p>{/each}{/if}
       </section>
     {:else if item.widgetId === "projects.context"}
       <section class:collapsed={item.collapsed}>
-        <div class="qwb-section-title"><h3>相关项目</h3><strong>{snapshot.context.relatedProjects.length}</strong></div>
-        {#if !item.collapsed}{#each snapshot.context.relatedProjects.slice(0, 6) as project}<button class="qwb-context-row" on:click={() => controller.openPath(project.path)}><span>{project.name}</span><b>›</b></button>{:else}<p class="qwb-empty">当前笔记没有关联项目。</p>{/each}{/if}
+        <div class="qwb-section-title"><h3><i use:obsidianIcon={"folder-kanban"}></i>相关项目</h3><strong>{snapshot.context.relatedProjects.length}</strong></div>
+        {#if !item.collapsed}{#each snapshot.context.relatedProjects.slice(0, 6) as project}<button class="qwb-context-row" on:click={() => controller.openPath(project.path)}><i use:obsidianIcon={"folder"}></i><span>{project.name}</span><b>›</b></button>{:else}<p class="qwb-empty">当前笔记没有关联项目。</p>{/each}{/if}
       </section>
     {:else if item.widgetId === "meetings.context"}
       <section class:collapsed={item.collapsed}>
-        <div class="qwb-section-title"><h3>近期会议</h3><strong>{snapshot.context.meetings.length}</strong></div>
-        {#if !item.collapsed}{#each snapshot.context.meetings.slice(0, 5) as meeting}<button class="qwb-context-row" on:click={() => controller.openPath(meeting.path)}><span>{meeting.name}</span><b>›</b></button>{:else}<p class="qwb-empty">当前笔记没有关联会议。</p>{/each}{/if}
+        <div class="qwb-section-title"><h3><i use:obsidianIcon={"calendar-days"}></i>近期会议</h3><strong>{snapshot.context.meetings.length}</strong></div>
+        {#if !item.collapsed}{#each snapshot.context.meetings.slice(0, 5) as meeting}<button class="qwb-context-row" on:click={() => controller.openPath(meeting.path)}><i use:obsidianIcon={"calendar"}></i><span>{meeting.name}</span><b>›</b></button>{:else}<p class="qwb-empty">当前笔记没有关联会议。</p>{/each}{/if}
       </section>
     {:else if item.widgetId === "core.quick-create"}
       <section class:collapsed={item.collapsed}>
-        <div class="qwb-section-title"><h3>快捷入口</h3></div>
-        {#if !item.collapsed}<div class="qwb-context-actions"><button on:click={() => controller.openWorkbench()}>工作台</button><button on:click={() => controller.openTaskBoard()}>任务看板</button><button disabled={busy} on:click={() => run(() => controller.refresh(), "已刷新")}>刷新</button></div>{/if}
+        <div class="qwb-section-title"><h3><i use:obsidianIcon={"zap"}></i>快捷入口</h3></div>
+        {#if !item.collapsed}<div class="qwb-context-actions"><button on:click={() => controller.openWorkbench()}><i use:obsidianIcon={"asterism-mark"}></i>工作台</button><button on:click={() => controller.openTaskBoard()}><i use:obsidianIcon={"list-todo"}></i>任务看板</button><button disabled={busy} on:click={() => run(() => controller.refresh(), "已刷新")}><i use:obsidianIcon={"refresh-cw"}></i>刷新</button></div>{/if}
       </section>
     {/if}
   {/each}
