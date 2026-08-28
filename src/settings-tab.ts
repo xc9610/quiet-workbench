@@ -97,7 +97,7 @@ export class QuietWorkbenchSettingTab extends PluginSettingTab {
           await this.host.saveSettings();
           await this.host.refreshWorkbench();
           new Notice(value ? "Asterism 写入已启用" : "Asterism 已切换为只读模式");
-          this.display();
+          this.redisplayPreservingScroll();
         })
       );
 
@@ -243,7 +243,7 @@ export class QuietWorkbenchSettingTab extends PluginSettingTab {
         for (const [id, label] of Object.entries(SIDEBAR_PROFILE_NAMES)) dropdown.addOption(id, label);
         dropdown.setValue(this.sidebarProfile).onChange((value) => {
           this.sidebarProfile = value as SidebarProfileId;
-          this.display();
+          this.redisplayPreservingScroll();
         });
       });
     const selectedSidebarLayoutId = this.host.settings.sidebarProfiles[this.sidebarProfile]
@@ -260,9 +260,9 @@ export class QuietWorkbenchSettingTab extends PluginSettingTab {
           .setDesc(item.hidden ? "已隐藏" : item.collapsed ? "已折叠" : "正在显示")
           .addExtraButton((button) => button.setIcon("arrow-up").setTooltip("上移").setDisabled(position === 0).onClick(async () => this.moveSidebarItem(activeSidebar, rows, position, -1)))
           .addExtraButton((button) => button.setIcon("arrow-down").setTooltip("下移").setDisabled(position === rows.length - 1).onClick(async () => this.moveSidebarItem(activeSidebar, rows, position, 1)))
-          .addToggle((toggle) => toggle.setTooltip("显示").setValue(!item.hidden).onChange(async (value) => { item.hidden = !value; await this.saveSidebarLayout(activeSidebar); this.display(); }))
-          .addToggle((toggle) => toggle.setTooltip("折叠").setValue(Boolean(item.collapsed)).onChange(async (value) => { item.collapsed = value; await this.saveSidebarLayout(activeSidebar); this.display(); }))
-          .addExtraButton((button) => button.setIcon("trash-2").setTooltip("移除").onClick(async () => { activeSidebar.items = activeSidebar.items.filter((entry) => entry !== item); await this.saveSidebarLayout(activeSidebar); this.display(); }));
+          .addToggle((toggle) => toggle.setTooltip("显示").setValue(!item.hidden).onChange(async (value) => { item.hidden = !value; await this.saveSidebarLayout(activeSidebar); this.redisplayPreservingScroll(); }))
+          .addToggle((toggle) => toggle.setTooltip("折叠").setValue(Boolean(item.collapsed)).onChange(async (value) => { item.collapsed = value; await this.saveSidebarLayout(activeSidebar); this.redisplayPreservingScroll(); }))
+          .addExtraButton((button) => button.setIcon("trash-2").setTooltip("移除").onClick(async () => { activeSidebar.items = activeSidebar.items.filter((entry) => entry !== item); await this.saveSidebarLayout(activeSidebar); this.redisplayPreservingScroll(); }));
       });
       let selectedSidebarWidget: string = SIDEBAR_COMPONENTS.find(([id]) => !activeSidebar.items.some((item) => item.widgetId === id))?.[0] ?? SIDEBAR_COMPONENTS[0][0];
       new Setting(containerEl)
@@ -274,7 +274,7 @@ export class QuietWorkbenchSettingTab extends PluginSettingTab {
           if (!definition?.surfaces.includes("sidebar")) { new Notice("该组件不支持侧栏"); return; }
           activeSidebar.items.push({ widgetId: selectedSidebarWidget, x: 0, y: activeSidebar.items.length, width: 1, height: definition.defaultSize.height });
           await this.saveSidebarLayout(activeSidebar);
-          this.display();
+          this.redisplayPreservingScroll();
         }));
     }
     let sidebarJson = JSON.stringify(activeSidebar, null, 2);
@@ -352,7 +352,16 @@ export class QuietWorkbenchSettingTab extends PluginSettingTab {
     rows.forEach((item, index) => { item.y = index; });
     layout.items = rows;
     await this.saveSidebarLayout(layout);
+    this.redisplayPreservingScroll();
+  }
+
+  private redisplayPreservingScroll(): void {
+    const scroller = this.containerEl.closest<HTMLElement>(".vertical-tab-content-container")
+      ?? this.containerEl.parentElement
+      ?? this.containerEl;
+    const scrollTop = scroller.scrollTop;
     this.display();
+    window.requestAnimationFrame(() => { scroller.scrollTop = scrollTop; });
   }
 
   private async saveSidebarLayout(layout: LayoutSchema): Promise<void> {

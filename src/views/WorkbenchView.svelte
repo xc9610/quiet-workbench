@@ -62,7 +62,7 @@
   type SceneId = string;
   type DialogKind = "entity" | "task" | "task-edit" | "migrate" | "knowledge" | "yolo-preview" | null;
   type MoveMode = "move" | "resize";
-  const UI_VERSION = "0.7.1";
+  const UI_VERSION = "0.7.2";
 
   interface SceneDefinition {
     id: SceneId;
@@ -1601,7 +1601,7 @@
 
 <div class:layout-editing={layoutEditMode} class="qwb-shell" data-scene={activeScene}>
   <header class="qwb-hero">
-    <div class="qwb-hero-topline"><span>ASTERISM · 星序 · {UI_VERSION}</span><time>{heroDate()}</time></div>
+    <div class="qwb-hero-topline"><span>ASTERISM · 星序 · {UI_VERSION}</span><div class="qwb-hero-topline-meta"><span use:obsidianIcon={heroStatusIcon()} class:enabled={heroStatus.tone === "enabled"} class:error={heroStatus.tone === "error"} class="qwb-hero-inline-status" role="status" aria-label={heroStatus.label} title={heroStatus.label}></span><time>{heroDate()}</time></div></div>
     <div class="qwb-hero-symbol" aria-hidden="true"><span use:obsidianIcon={"asterism-mark"}></span><i use:obsidianIcon={"sparkles"}></i></div>
     <div class="qwb-hero-main">
       {#key `${heroCopy.title}|${heroCopy.subtitle}`}
@@ -1613,10 +1613,8 @@
       {/key}
       <div class="qwb-header-actions" role="toolbar" aria-label="工作台操作">
         <button use:obsidianIcon={"list-todo"} class="qwb-hero-action" aria-label="打开任务看板" title="任务看板" on:click={() => controller.openTaskBoard()}></button>
-        <span use:obsidianIcon={heroStatusIcon()} class:enabled={heroStatus.tone === "enabled"} class:error={heroStatus.tone === "error"} class="qwb-hero-action qwb-hero-status" role="status" aria-label={heroStatus.label} title={heroStatus.label}></span>
-        <button use:obsidianIcon={"pencil"} class="qwb-hero-action" aria-label="编辑 Hero 文案" title="编辑 Hero 文案" on:click={() => controller.openPluginSettings()}></button>
-        <button use:obsidianIcon={layoutEditMode ? "check" : "layout-dashboard"} class:active={layoutEditMode} class="qwb-hero-action" aria-label={layoutEditMode ? "完成布局编辑" : "编辑布局"} title={layoutEditMode ? "完成编辑" : "编辑布局"} aria-pressed={layoutEditMode} on:click={() => (layoutEditMode = !layoutEditMode)}></button>
         <button use:obsidianIcon={"refresh-cw"} class="qwb-hero-action" aria-label="刷新工作台" title="刷新" disabled={busy} on:click={() => run(() => controller.refresh(), "已刷新")}></button>
+        <button use:obsidianIcon={layoutEditMode ? "check" : "layout-dashboard"} class:active={layoutEditMode} class="qwb-hero-action" aria-label={layoutEditMode ? "完成布局编辑" : "编辑布局"} title={layoutEditMode ? "完成编辑" : "编辑布局"} aria-pressed={layoutEditMode} on:click={() => (layoutEditMode = !layoutEditMode)}></button>
         <button use:obsidianIcon={"rotate-ccw"} class="qwb-hero-action" aria-label="撤销最近一次业务写入" title="撤销业务写入" disabled={busy} on:click={() => run(() => controller.undoLastTransaction(), "已撤销最近一次操作")}></button>
       </div>
     </div>

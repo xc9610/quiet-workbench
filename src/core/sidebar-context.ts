@@ -16,6 +16,14 @@ export function resolveSidebarProfile(context: SidebarContextDescriptor): Sideba
   return "note";
 }
 
+export function sidebarTaskSource<T>(
+  context: SidebarContextDescriptor,
+  contextualTasks: readonly T[],
+  globalTasks: readonly T[]
+): readonly T[] {
+  return context.kind ? contextualTasks : globalTasks;
+}
+
 export const SIDEBAR_PROFILE_NAMES: Readonly<Record<SidebarProfileId, string>> = Object.freeze({
   workbench: "工作台",
   "task-board": "任务看板",

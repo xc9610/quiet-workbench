@@ -3661,6 +3661,27 @@
 .qwb-hero-status.enabled { color: var(--color-green); }
 .qwb-hero-status.error { color: var(--text-error); }
 
+.qwb-hero-topline-meta,
+.qwb-hero-inline-status {
+  display: inline-flex;
+  align-items: center;
+}
+
+.qwb-hero-topline-meta { gap: 9px; }
+
+.qwb-hero-inline-status {
+  width: 18px;
+  height: 18px;
+  justify-content: center;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--text-muted) 8%, transparent);
+  color: var(--text-muted);
+}
+
+.qwb-hero-inline-status svg { width: 11px; height: 11px; }
+.qwb-hero-inline-status.enabled { color: var(--color-green); }
+.qwb-hero-inline-status.error { color: var(--text-error); }
+
 .qwb-library-grid > button > i svg {
   width: 17px;
   height: 17px;

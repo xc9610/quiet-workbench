@@ -1,23 +1,30 @@
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
   import { setIcon } from "obsidian";
-  import type { TaskRecord } from "../core/types";
+  import type { LayoutItem, TaskRecord } from "../core/types";
   import { formatDate } from "../services/template-service";
   import type { WorkbenchController, WorkbenchSnapshot } from "../ui/controller";
   import { layoutItemKey } from "../core/layout";
   import { EMPTY_SNAPSHOT } from "../ui/controller";
   import { effectiveTaskDate } from "../domain/widget-data";
-  import { resolveSidebarProfile, SIDEBAR_PROFILE_NAMES } from "../core/sidebar-context";
+  import { resolveSidebarProfile, sidebarTaskSource, SIDEBAR_PROFILE_NAMES } from "../core/sidebar-context";
 
   export let controller: WorkbenchController;
   let snapshot: WorkbenchSnapshot = controller.getSnapshot() ?? EMPTY_SNAPSHOT;
   let unsubscribe = () => {};
   let upcoming: TaskRecord[] = [];
+  let sidebarLayoutItems: LayoutItem[] = [];
   let memoDraft = "";
   let busy = false;
   let message = "";
 
-  $: upcoming = collectUpcomingTasks(snapshot.tasks);
+  $: upcoming = collectUpcomingTasks([...sidebarTaskSource(snapshot.context, snapshot.context.tasks, snapshot.tasks)]);
+  $: sidebarLayoutItems = resolveSidebarItems(
+    resolveSidebarProfile(snapshot.context),
+    controller.settings.sidebarProfiles,
+    controller.settings.activeSidebarLayout,
+    controller.settings.layouts
+  );
 
   function collectUpcomingTasks(tasks: TaskRecord[]): TaskRecord[] {
     const today = new Date();
@@ -47,10 +54,14 @@
     return { update(next: string) { setIcon(node, next); } };
   }
 
-  function sidebarItems() {
-    const profile = resolveSidebarProfile(snapshot.context);
-    const layoutId = controller.settings.sidebarProfiles[profile] ?? controller.settings.activeSidebarLayout;
-    const layout = controller.settings.layouts.find(
+  function resolveSidebarItems(
+    profile: ReturnType<typeof resolveSidebarProfile>,
+    profiles: WorkbenchController["settings"]["sidebarProfiles"],
+    fallbackLayoutId: string,
+    layouts: WorkbenchController["settings"]["layouts"]
+  ): LayoutItem[] {
+    const layoutId = profiles[profile] ?? fallbackLayoutId;
+    const layout = layouts.find(
       (entry) => entry.surface === "sidebar" && entry.id === layoutId
     );
     return (layout?.items ?? [])
@@ -92,7 +103,7 @@
 
 <div class="qwb-context">
   <div class="qwb-context-profile"><span><i use:obsidianIcon={"panel-right"}></i>{SIDEBAR_PROFILE_NAMES[resolveSidebarProfile(snapshot.context)]}</span><small>自动上下文</small></div>
-  {#each sidebarItems() as item (layoutItemKey(item))}
+  {#each sidebarLayoutItems as item (layoutItemKey(item))}
     {#if item.widgetId === "core.context"}
       <header class:collapsed={item.collapsed}>
         <span class="qwb-eyebrow">CURRENT CONTEXT</span>

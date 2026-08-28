@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { activityLevel, activityStats, buildActivityCalendar } from "../src/domain/activity";
-import { resolveSidebarProfile } from "../src/core/sidebar-context";
+import { resolveSidebarProfile, sidebarTaskSource } from "../src/core/sidebar-context";
 
 describe("activity heatmap", () => {
   it("builds a Monday-aligned 53 week calendar and stable levels", () => {
@@ -36,5 +36,14 @@ describe("contextual sidebar routing", () => {
     expect(resolveSidebarProfile({ ...base, surface: "note", kind: "meeting" })).toBe("meeting");
     expect(resolveSidebarProfile({ ...base, surface: "note", kind: "knowledge" })).toBe("knowledge");
     expect(resolveSidebarProfile({ ...base, surface: "note" })).toBe("note");
+  });
+
+  it("uses contextual tasks for entity notes and global tasks elsewhere", () => {
+    const contextual = ["project task"];
+    const global = ["global task"];
+    expect(sidebarTaskSource({ surface: "note", kind: "project" }, contextual, global)).toBe(contextual);
+    expect(sidebarTaskSource({ surface: "note", kind: "client" }, contextual, global)).toBe(contextual);
+    expect(sidebarTaskSource({ surface: "workbench" }, contextual, global)).toBe(global);
+    expect(sidebarTaskSource({ surface: "note" }, contextual, global)).toBe(global);
   });
 });
