@@ -56,13 +56,14 @@
   } from "../domain/widget-data";
   import { selectHeroCopy, type HeroCopy, type HeroCopyContext } from "../core/hero-copy";
   import { activityStats, buildActivityCalendar } from "../domain/activity";
+  import { buildMonthCalendar, calendarDateLabel, calendarMonthLabel, shiftCalendarMonth, type MonthCalendarCell } from "../domain/calendar";
 
   export let controller: WorkbenchController;
 
   type SceneId = string;
   type DialogKind = "entity" | "task" | "task-edit" | "migrate" | "knowledge" | "yolo-preview" | null;
   type MoveMode = "move" | "resize";
-  const UI_VERSION = "0.7.2";
+  const UI_VERSION = "0.7.3";
 
   interface SceneDefinition {
     id: SceneId;
@@ -78,6 +79,22 @@
     relatedClient: string;
     relatedProject: string;
     date: string;
+  }
+
+  interface CalendarViewState {
+    month: string;
+    selected: string;
+  }
+
+  interface CalendarEntry {
+    id: string;
+    date: string;
+    title: string;
+    subtitle: string;
+    path: string;
+    kind: "task" | "meeting";
+    overdue: boolean;
+    completed: boolean;
   }
 
   const sceneDefinitions: SceneDefinition[] = [
@@ -174,6 +191,7 @@
   let sharedMeetingPath = "";
   let sharedSupplierPath = "";
   let widgetSearch: Record<string, string> = {};
+  let calendarViewStates: Record<string, CalendarViewState> = {};
   let isDesktop = !Platform.isMobile;
   let gridEl: HTMLDivElement;
   let gridColumnCount = 4;
@@ -963,6 +981,75 @@
       groups.set(date, [...(groups.get(date) ?? []), task]);
     }
     return [...groups.entries()].sort(([left], [right]) => (left === "未安排" ? 1 : right === "未安排" ? -1 : left.localeCompare(right)));
+  }
+
+  function calendarState(item: LayoutItem, saved?: CalendarViewState): CalendarViewState {
+    if (saved) return saved;
+    const today = formatDate(new Date(), "YYYY-MM-DD");
+    return { month: today.slice(0, 7), selected: today };
+  }
+
+  function calendarCells(item: LayoutItem, saved?: CalendarViewState): MonthCalendarCell[] {
+    const state = calendarState(item, saved);
+    return buildMonthCalendar(state.month, formatDate(new Date(), "YYYY-MM-DD"));
+  }
+
+  function setCalendarDate(item: LayoutItem, date: string): void {
+    calendarViewStates = {
+      ...calendarViewStates,
+      [itemKey(item)]: { month: date.slice(0, 7), selected: date }
+    };
+  }
+
+  function moveCalendarMonth(item: LayoutItem, offset: number): void {
+    const current = calendarState(item, calendarViewStates[itemKey(item)]);
+    const month = shiftCalendarMonth(current.month, offset);
+    const today = formatDate(new Date(), "YYYY-MM-DD");
+    setCalendarDate(item, month === today.slice(0, 7) ? today : `${month}-01`);
+  }
+
+  function resetCalendarToday(item: LayoutItem): void {
+    setCalendarDate(item, formatDate(new Date(), "YYYY-MM-DD"));
+  }
+
+  function calendarEntries(item: LayoutItem): CalendarEntry[] {
+    const today = formatDate(new Date(), "YYYY-MM-DD");
+    if (dataSource(item) === "meetings") {
+      return scopedMeetings(item).flatMap((meeting) => meeting.due ? [{
+        id: meeting.path,
+        date: meeting.due.slice(0, 10),
+        title: meeting.name,
+        subtitle: meeting.project || meeting.client || "会议记录",
+        path: meeting.path,
+        kind: "meeting" as const,
+        overdue: false,
+        completed: false
+      }] : []);
+    }
+    return scopedTasks(item).flatMap((task) => {
+      const date = effectiveTaskDate(task);
+      if (!date) return [];
+      return [{
+        id: task.id,
+        date: date.slice(0, 10),
+        title: task.text,
+        subtitle: `${{ project: "项目", client: "客户", "meeting-draft": "会议草稿" }[task.scope]} · ${task.sourceName}`,
+        path: task.path,
+        kind: "task" as const,
+        overdue: !task.completed && date.slice(0, 10) < today,
+        completed: task.completed
+      }];
+    });
+  }
+
+  function calendarEntriesForDate(item: LayoutItem, date: string): CalendarEntry[] {
+    return calendarEntries(item).filter((entry) => entry.date === date);
+  }
+
+  function calendarDotClass(entry: CalendarEntry): string {
+    if (entry.completed) return "completed";
+    if (entry.overdue) return "overdue";
+    return entry.kind;
   }
 
   function taskRowsForWidget(item: LayoutItem): TaskRecord[] {
@@ -1765,24 +1852,34 @@
                   </section>
                 {/each}
               </div>
-            {:else if item.widgetId === "tasks.calendar" || (item.widgetId === "view.calendar" && dataSource(item) === "tasks")}
-              <div class="qwb-date-groups">
-                {#each groupTasksByDate(item) as group}
-                  <section>
-                    <header><strong>{group[0]}</strong><span>{group[1].length}</span></header>
-                    <div class="qwb-date-column-body">
-                      {#each group[1] as task (task.id)}
-                        <button on:click={() => controller.openPath(task.path)}><span>{task.text}</span><small>{task.sourceName}</small></button>
-                      {/each}
-                    </div>
-                  </section>
-                {:else}<p class="qwb-empty">没有可显示的任务日期。</p>{/each}
-              </div>
-            {:else if item.widgetId === "view.calendar" && dataSource(item) === "meetings"}
-              <div class="qwb-date-groups">
-                {#each [...new Map(scopedMeetings(item).filter((meeting) => meeting.due).map((meeting) => [meeting.due!, scopedMeetings(item).filter((entry) => entry.due === meeting.due)])).entries()].sort((left, right) => left[0].localeCompare(right[0])) as group}
-                  <section><header><strong>{group[0]}</strong><span>{group[1].length}</span></header><div class="qwb-date-column-body">{#each group[1] as meeting}<button on:click={() => controller.openPath(meeting.path)}><span>{meeting.name}</span><small>{meeting.project || meeting.client || "会议记录"}</small></button>{/each}</div></section>
-                {:else}<p class="qwb-empty">没有带日期的会议记录。</p>{/each}
+            {:else if item.widgetId === "tasks.calendar" || item.widgetId === "view.calendar"}
+              <div class="qwb-month-calendar">
+                <header class="qwb-month-calendar-toolbar">
+                  <button use:obsidianIcon={"chevron-left"} aria-label="上个月" title="上个月" on:click={() => moveCalendarMonth(item, -1)}></button>
+                  <strong>{calendarMonthLabel(calendarState(item, calendarViewStates[itemKey(item)]).month)}</strong>
+                  <button class="qwb-calendar-today" on:click={() => resetCalendarToday(item)}>今天</button>
+                  <button use:obsidianIcon={"chevron-right"} aria-label="下个月" title="下个月" on:click={() => moveCalendarMonth(item, 1)}></button>
+                </header>
+                <div class="qwb-month-calendar-weekdays" aria-hidden="true">{#each ["一", "二", "三", "四", "五", "六", "日"] as weekday}<span>{weekday}</span>{/each}</div>
+                <div class="qwb-month-calendar-grid">
+                  {#each calendarCells(item, calendarViewStates[itemKey(item)]) as cell (cell.date)}
+                    <button class:outside={!cell.inMonth} class:today={cell.isToday} class:selected={calendarState(item, calendarViewStates[itemKey(item)]).selected === cell.date} aria-label={`${cell.date}，${calendarEntriesForDate(item, cell.date).length} 项`} title={`${cell.date} · ${calendarEntriesForDate(item, cell.date).length} 项`} on:click={() => setCalendarDate(item, cell.date)}>
+                      <time>{cell.day}</time>
+                      <span class="qwb-calendar-dots">
+                        {#each calendarEntriesForDate(item, cell.date).slice(0, 3) as entry (entry.id)}<i class={calendarDotClass(entry)}></i>{/each}
+                        {#if calendarEntriesForDate(item, cell.date).length > 3}<small>{calendarEntriesForDate(item, cell.date).length}</small>{/if}
+                      </span>
+                    </button>
+                  {/each}
+                </div>
+                <section class="qwb-calendar-detail">
+                  <header><strong>{calendarDateLabel(calendarState(item, calendarViewStates[itemKey(item)]).selected)}</strong><span>{calendarEntriesForDate(item, calendarState(item, calendarViewStates[itemKey(item)]).selected).length} 项</span></header>
+                  <div>
+                    {#each calendarEntriesForDate(item, calendarState(item, calendarViewStates[itemKey(item)]).selected) as entry (entry.id)}
+                      <button class:overdue={entry.overdue} class:completed={entry.completed} on:click={() => controller.openPath(entry.path)}><i class={calendarDotClass(entry)}></i><span><strong>{entry.title}</strong><small>{entry.subtitle}</small></span><em>{entry.kind === "meeting" ? "会议" : entry.completed ? "已完成" : "待办"}</em></button>
+                    {:else}<p class="qwb-empty">这一天没有{dataSource(item) === "meetings" ? "会议" : "任务"}。</p>{/each}
+                  </div>
+                </section>
               </div>
             {:else if item.widgetId === "tasks.quadrant" || (item.widgetId === "view.quadrant" && dataSource(item) === "tasks")}
               <div class="qwb-quadrants">

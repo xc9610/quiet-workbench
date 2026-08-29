@@ -2437,6 +2437,234 @@
   white-space: nowrap;
 }
 
+.qwb-month-calendar {
+  display: grid;
+  grid-template-rows: auto auto minmax(210px, 1.45fr) minmax(92px, .75fr);
+  gap: 8px;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.qwb-month-calendar-toolbar {
+  display: grid;
+  grid-template-columns: 28px minmax(110px, 1fr) auto 28px;
+  align-items: center;
+  gap: 6px;
+}
+
+.qwb-month-calendar-toolbar > strong {
+  font-size: 12px;
+  text-align: center;
+}
+
+.qwb-month-calendar-toolbar > button {
+  display: grid !important;
+  width: 28px !important;
+  height: 28px !important;
+  min-width: 28px !important;
+  min-height: 28px !important;
+  padding: 0 !important;
+  place-items: center;
+  border: 1px solid var(--qwb-border) !important;
+  border-radius: 8px !important;
+  background: var(--background-secondary) !important;
+  box-shadow: none !important;
+  color: var(--text-muted) !important;
+}
+
+.qwb-month-calendar-toolbar > button:hover {
+  border-color: var(--interactive-accent) !important;
+  color: var(--text-accent) !important;
+}
+
+.qwb-month-calendar-toolbar > button svg {
+  width: 14px;
+  height: 14px;
+}
+
+.qwb-month-calendar-toolbar > .qwb-calendar-today {
+  width: auto !important;
+  min-width: 42px !important;
+  padding: 0 9px !important;
+  font-size: 9px !important;
+}
+
+.qwb-month-calendar-weekdays,
+.qwb-month-calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.qwb-month-calendar-weekdays {
+  color: var(--text-faint);
+  font-size: 8.5px;
+  text-align: center;
+}
+
+.qwb-month-calendar-grid {
+  grid-template-rows: repeat(6, minmax(32px, 1fr));
+  gap: 3px;
+  min-height: 210px;
+}
+
+.qwb-month-calendar-grid > button {
+  position: relative;
+  display: grid !important;
+  grid-template-rows: auto 1fr;
+  width: 100% !important;
+  height: auto !important;
+  min-width: 0 !important;
+  min-height: 32px !important;
+  padding: 5px 6px !important;
+  align-content: start !important;
+  justify-items: start !important;
+  overflow: hidden;
+  border: 1px solid var(--qwb-border) !important;
+  border-radius: 7px !important;
+  background: var(--background-primary) !important;
+  box-shadow: none !important;
+  color: var(--text-normal) !important;
+}
+
+.qwb-month-calendar-grid > button:hover {
+  background: var(--background-modifier-hover) !important;
+}
+
+.qwb-month-calendar-grid > button.outside {
+  background: color-mix(in srgb, var(--background-secondary) 74%, transparent) !important;
+  color: var(--text-faint) !important;
+  opacity: .62;
+}
+
+.qwb-month-calendar-grid > button.today {
+  border-color: color-mix(in srgb, var(--interactive-accent) 78%, var(--qwb-border)) !important;
+}
+
+.qwb-month-calendar-grid > button.selected {
+  border-color: var(--interactive-accent) !important;
+  background: var(--qwb-accent-soft) !important;
+  color: var(--text-accent) !important;
+}
+
+.qwb-month-calendar-grid time {
+  font-size: 9px;
+  font-weight: 650;
+  line-height: 1;
+}
+
+.qwb-calendar-dots {
+  display: flex;
+  min-width: 0;
+  align-self: end;
+  align-items: center;
+  gap: 3px;
+  padding-top: 4px;
+}
+
+.qwb-calendar-dots i,
+.qwb-calendar-detail button > i {
+  width: 5px;
+  height: 5px;
+  flex: 0 0 5px;
+  border-radius: 50%;
+  background: var(--interactive-accent);
+}
+
+.qwb-calendar-dots i.meeting,
+.qwb-calendar-detail button > i.meeting { background: var(--color-purple); }
+.qwb-calendar-dots i.overdue,
+.qwb-calendar-detail button > i.overdue { background: var(--color-red); }
+.qwb-calendar-dots i.completed,
+.qwb-calendar-detail button > i.completed { background: var(--text-faint); }
+
+.qwb-calendar-dots small {
+  color: var(--text-muted);
+  font-size: 7px;
+  font-weight: 650;
+  line-height: 1;
+}
+
+.qwb-calendar-detail {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  padding-top: 8px;
+  overflow: hidden;
+  border-top: 1px solid var(--qwb-border);
+}
+
+.qwb-calendar-detail > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 2px 6px;
+}
+
+.qwb-calendar-detail > header strong { font-size: 10px; }
+.qwb-calendar-detail > header span { color: var(--text-faint); font-size: 8.5px; }
+
+.qwb-calendar-detail > div {
+  min-width: 0;
+  min-height: 0;
+  padding-right: 2px;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scrollbar-width: thin;
+}
+
+.qwb-calendar-detail button {
+  display: grid !important;
+  grid-template-columns: 7px minmax(0, 1fr) auto;
+  align-items: center !important;
+  gap: 8px !important;
+  width: 100% !important;
+  height: auto !important;
+  min-width: 0 !important;
+  min-height: 43px !important;
+  margin-bottom: 5px !important;
+  padding: 7px 9px !important;
+  overflow: hidden;
+  border: 1px solid var(--qwb-border) !important;
+  border-radius: 8px !important;
+  background: var(--background-primary) !important;
+  box-shadow: none !important;
+  color: var(--text-normal) !important;
+  text-align: left !important;
+}
+
+.qwb-calendar-detail button:hover { background: var(--background-modifier-hover) !important; }
+.qwb-calendar-detail button.completed { opacity: .58; }
+.qwb-calendar-detail button.overdue em { color: var(--color-red); }
+
+.qwb-calendar-detail button > span {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.qwb-calendar-detail button strong,
+.qwb-calendar-detail button small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qwb-calendar-detail button strong { font-size: 9.5px; }
+.qwb-calendar-detail button small { color: var(--text-faint); font-size: 8px; }
+.qwb-calendar-detail button em { color: var(--text-muted); font-size: 8px; font-style: normal; white-space: nowrap; }
+
+@container (max-width: 420px) {
+  .qwb-month-calendar { grid-template-rows: auto auto minmax(190px, 1.25fr) minmax(86px, .75fr); }
+  .qwb-month-calendar-grid { min-height: 190px; }
+  .qwb-month-calendar-grid > button { padding: 4px !important; }
+  .qwb-calendar-dots { gap: 2px; }
+  .qwb-calendar-detail button em { display: none; }
+}
+
 .qwb-matrix {
   grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
 }
