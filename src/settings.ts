@@ -2,8 +2,12 @@ import type { LayoutSchema, SidebarProfileId } from "./core/types";
 import { DEFAULT_HERO_SETTINGS, type HeroCopySettings } from "./core/hero-copy";
 import { DEFAULT_SIDEBAR_PROFILES } from "./core/sidebar-context";
 
+export type AppearanceMode = "clear" | "journal";
+
 export interface QuietWorkbenchSettings {
   writesEnabled: boolean;
+  openWorkbenchOnStartup: boolean;
+  appearanceMode: AppearanceMode;
   projectFolder: string;
   clientFolder: string;
   meetingFolder: string;
@@ -24,10 +28,14 @@ export interface QuietWorkbenchSettings {
   orderedGridVersion: number;
   legacyPositionedLayouts: LayoutSchema[];
   transactionLimit: number;
+  /** Full Calendar public API access token. Stored in local plugin settings, never in Markdown. */
+  fullCalendarAccessToken: string;
 }
 
 export const DEFAULT_SETTINGS: QuietWorkbenchSettings = {
   writesEnabled: false,
+  openWorkbenchOnStartup: true,
+  appearanceMode: "clear",
   projectFolder: "10_业务_Business/02_项目_Projects",
   clientFolder: "10_业务_Business/01_客户_Clients",
   meetingFolder: "10_业务_Business/03_会议_Meetings",
@@ -35,7 +43,7 @@ export const DEFAULT_SETTINGS: QuietWorkbenchSettings = {
   knowledgeFolder: "20_技术_Technology",
   formalKnowledgeFolder: "20_技术_Technology/90_待整理_Inbox",
   knowledgeTemplate: "",
-  memoPath: "40_管理_Management/01_工作_Work/Quiet Workbench 速记.md",
+  memoPath: "40_管理_Management/01_工作_Work/Asterism 速记.md",
   templates: {
     project: "40_管理_Management/03_模板_Templates/TP 项目记录 v3.md",
     client: "40_管理_Management/03_模板_Templates/TP 客户记录 v2.md",
@@ -63,5 +71,6 @@ export const DEFAULT_SETTINGS: QuietWorkbenchSettings = {
   layouts: [],
   orderedGridVersion: 0,
   legacyPositionedLayouts: [],
-  transactionLimit: 50
+  transactionLimit: 50,
+  fullCalendarAccessToken: ""
 };

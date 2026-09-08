@@ -10,6 +10,8 @@ import type { QuietWorkbenchSettings } from "../settings";
 import type { QuickMemoEntry } from "../domain/memo";
 import type { MeetingMigrationBatchResult } from "../services/meeting-migration-service";
 import type { KnowledgePublicationInput, KnowledgePublicationPreview } from "../services/knowledge-publishing-service";
+import type { ProjectReviewInput } from "../domain/project-review";
+import type { FullCalendarSnapshot } from "../services/full-calendar-adapter";
 
 export interface DiagnosticItem {
   id: string;
@@ -27,6 +29,8 @@ export interface EntitySummary {
   related?: string;
   detail?: string;
   due?: string;
+  startTime?: string;
+  endTime?: string;
   phase?: string;
   projectType?: string;
   client?: string;
@@ -36,6 +40,14 @@ export interface EntitySummary {
   relationshipStatus?: string;
   followupDate?: string;
   updatedAt?: number;
+  owner?: string;
+  businessType?: string;
+  nextAction?: string;
+  waitingOn?: string;
+  reviewStatus?: string;
+  reviewDue?: string;
+  reviewNote?: string;
+  reviewTrigger?: string;
 }
 
 export interface QuickMemoSnapshot {
@@ -66,6 +78,7 @@ export interface WorkbenchSnapshot {
   knowledge: EntitySummary[];
   tasks: TaskRecord[];
   activity: ActivityDay[];
+  calendar: FullCalendarSnapshot;
   transactionHistory: TransactionReceipt[];
   memo: QuickMemoSnapshot;
   context: ContextSnapshot;
@@ -78,6 +91,8 @@ export interface CreateEntityInput {
   relatedClient?: string;
   relatedProject?: string;
   date?: string;
+  startTime?: string;
+  endTime?: string;
   openAfterCreate?: boolean;
 }
 
@@ -95,11 +110,21 @@ export interface WorkbenchController {
   refresh(): Promise<void>;
   openWorkbench(): Promise<void>;
   openTaskBoard(): Promise<void>;
+  openProjectReview(): Promise<void>;
+  openCalendar(): Promise<void>;
+  openGlobalSearch(): Promise<void>;
+  authorizeCalendar(): Promise<void>;
+  openContextPanel(): Promise<void>;
+  createBlankNote(): Promise<void>;
   setActivePath(path?: string, surface?: ContextSurface): Promise<void>;
   openPath(path: string): Promise<void>;
   createEntity(input: CreateEntityInput): Promise<TransactionReceipt>;
   previewEntity(input: CreateEntityInput): Promise<{ path: string; content: string }>;
   addProjectTask(input: AddProjectTaskInput): Promise<TransactionReceipt>;
+  tasksIntegrationAvailable(): boolean;
+  addProjectTaskWithTasks(projectPath: string): Promise<"committed" | "cancelled" | "unavailable">;
+  editTaskWithTasks(task: TaskRecord): Promise<"committed" | "cancelled" | "unavailable">;
+  scheduleTaskInCalendar(task: TaskRecord, date: string): Promise<void>;
   updateTask(task: TaskRecord, patch: { completed?: boolean; due?: string | null; priority?: TaskRecord["priority"] }): Promise<TransactionReceipt>;
   migrateMeetingTask(task: TaskRecord, targetPath: string): Promise<TransactionReceipt | undefined>;
   migrateMeetingTasks(tasks: TaskRecord[], targetPath: string): Promise<MeetingMigrationBatchResult>;
@@ -108,6 +133,8 @@ export interface WorkbenchController {
   previewKnowledgePublication(input: KnowledgePublicationInput): Promise<KnowledgePublicationPreview>;
   publishKnowledge(preview: KnowledgePublicationPreview): Promise<TransactionReceipt>;
   appendQuickMemo(text: string): Promise<TransactionReceipt>;
+  saveProjectReview(input: ProjectReviewInput): Promise<TransactionReceipt>;
+  openProjectReviewInYolo(projectPath: string): Promise<void>;
   openYolo(path?: string): Promise<void>;
   saveLayout(sceneId: string, items: LayoutItem[]): Promise<void>;
   activateLayout(sceneId: string): Promise<void>;
@@ -128,6 +155,12 @@ export const EMPTY_SNAPSHOT: WorkbenchSnapshot = {
   knowledge: [],
   tasks: [],
   activity: [],
+  calendar: {
+    state: "unavailable",
+    available: false,
+    authorized: false,
+    events: []
+  },
   transactionHistory: [],
   memo: { path: "", exists: false, recent: [] },
   context: {

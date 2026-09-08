@@ -14,6 +14,7 @@ function reader(overrides: Partial<DiagnosticVaultReader> = {}): DiagnosticVault
 
 describe("DiagnosticService", () => {
   it("checks folders, templates, aliases and optional plugins through a read-only port", async () => {
+    expect(DEFAULT_SETTINGS.openWorkbenchOnStartup).toBe(true);
     const adapter = reader();
     const report = await new DiagnosticService(adapter).run(DEFAULT_SETTINGS);
     expect(report.readOnly).toBe(true);

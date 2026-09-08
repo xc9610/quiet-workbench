@@ -5,7 +5,6 @@ export type TaskBoardDateColumn = "backlog" | "due" | "next-seven" | "undated" |
 export type TaskQuadrant = "important-urgent" | "important" | "urgent" | "later";
 export type ProjectHealthLevel = "healthy" | "attention" | "risk" | "unknown";
 export type ClientFollowupBucket = "overdue" | "today" | "week" | "later" | "unscheduled";
-
 export interface ProjectHealthInput {
   due?: string;
   detail?: string;
@@ -60,6 +59,35 @@ export function isWaitingTask(task: Pick<TaskRecord, "text">): boolean {
 
 export function isRecurringTask(task: Pick<TaskRecord, "text">): boolean {
   return /(?:🔁|重复|每天|每日|每周|每月|每季|每年|recurr)/iu.test(task.text);
+}
+
+/** Apply task-list semantics before the visual row limit so relevant work is never hidden by source order. */
+export function taskListRows(
+  tasks: readonly TaskRecord[],
+  mode: string,
+  today: string,
+  weekEnd: string,
+  limit: number
+): TaskRecord[] {
+  let rows = [...tasks];
+  if (mode === "inbox") rows = rows.filter((task) => !effectiveTaskDate(task) || task.scope !== "project");
+  if (mode === "unscheduled") {
+    rows = rows
+      .filter((task) => !effectiveTaskDate(task))
+      .sort((left, right) => taskPriorityRank(left.priority) - taskPriorityRank(right.priority));
+  }
+  if (mode === "waiting") rows = rows.filter(isWaitingTask);
+  if (mode === "week") rows = rows.filter((task) => {
+    const date = effectiveTaskDate(task);
+    return Boolean(date && date >= today && date <= weekEnd);
+  });
+  if (mode === "recurring") rows = rows.filter(isRecurringTask);
+  if (mode === "meeting-actions") rows = rows.filter((task) => task.scope === "meeting-draft");
+  return rows.slice(0, Math.max(1, limit));
+}
+
+function taskPriorityRank(priority: TaskRecord["priority"]): number {
+  return { highest: 0, high: 1, normal: 2, low: 3, lowest: 4 }[priority ?? "normal"];
 }
 
 export function dateAfter(today: string, days: number): string {

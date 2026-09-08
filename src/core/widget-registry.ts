@@ -176,7 +176,7 @@ function validateGenericConfig(config: Readonly<Record<string, unknown>>): Widge
 const GENERIC_WIDGETS: RegisteredWidgetDefinition[] = [
   { id: "view.list", title: "列表", description: "任务、项目、客户、会议或知识的通用列表", surfaces: both, pack: "core", refresh: "live", defaultSize: { width: 6, height: 5 }, libraryCategory: "view", validateConfig: validateGenericConfig },
   { id: "view.board", title: "看板", description: "按状态、时间或其他字段分列", surfaces: ["workbench"], pack: "core", refresh: "live", defaultSize: { width: 8, height: 6 }, libraryCategory: "view", validateConfig: validateGenericConfig },
-  { id: "view.calendar", title: "日历", description: "按计划或截止日期查看条目", surfaces: ["workbench"], pack: "core", refresh: "live", defaultSize: { width: 7, height: 6 }, libraryCategory: "view", validateConfig: validateGenericConfig },
+  { id: "view.calendar", title: "日历", description: "按用途查看截止任务或计划日程", surfaces: ["workbench"], pack: "core", refresh: "live", defaultSize: { width: 7, height: 6 }, libraryCategory: "view", validateConfig: validateGenericConfig },
   { id: "view.quadrant", title: "四象限", description: "按重要与紧急程度组织任务", surfaces: ["workbench"], pack: "core", refresh: "live", defaultSize: { width: 8, height: 6 }, libraryCategory: "view", validateConfig: validateGenericConfig },
   { id: "view.timeline", title: "时间线", description: "按日期连续展示任务或项目动态", surfaces: ["workbench"], pack: "core", refresh: "live", defaultSize: { width: 6, height: 5 }, libraryCategory: "view", validateConfig: validateGenericConfig },
   { id: "view.metrics", title: "指标", description: "工作量、健康度或进度摘要", surfaces: both, pack: "core", refresh: "live", defaultSize: { width: 4, height: 4 }, libraryCategory: "view", validateConfig: validateGenericConfig },
@@ -191,7 +191,7 @@ const LEGACY_WIDGETS: RegisteredWidgetDefinition[] = [
   { id: "tasks.today", title: "今日焦点", surfaces: both, pack: "tasks", refresh: "live", defaultSize: { width: 8, height: 6 }, validateConfig: validateFocusConfig },
   { id: "tasks.list", title: "任务列表", description: "可筛选的完整任务列表", surfaces: ["workbench"], pack: "tasks", refresh: "live", defaultSize: { width: 6, height: 5 }, validateConfig: validateCollectionConfig },
   { id: "tasks.board", title: "任务看板", description: "按时间状态分列查看任务", surfaces: ["workbench"], pack: "tasks", refresh: "live", defaultSize: { width: 8, height: 6 }, validateConfig: validateCollectionConfig },
-  { id: "tasks.calendar", title: "任务日历", description: "按计划或截止日期查看任务", surfaces: ["workbench"], pack: "tasks", refresh: "live", defaultSize: { width: 7, height: 6 }, validateConfig: validateCollectionConfig },
+  { id: "tasks.calendar", title: "任务日历", description: "按截止日期查看任务期限", surfaces: ["workbench"], pack: "tasks", refresh: "live", defaultSize: { width: 7, height: 6 }, validateConfig: validateCollectionConfig },
   { id: "tasks.quadrant", title: "任务四象限", description: "按重要与紧急程度整理任务", surfaces: ["workbench"], pack: "tasks", refresh: "live", defaultSize: { width: 8, height: 6 }, validateConfig: validateCollectionConfig },
   { id: "tasks.inbox", title: "任务收件箱", description: "未安排、客户行动和会议草稿", surfaces: both, pack: "tasks", refresh: "live", defaultSize: { width: 5, height: 5 }, validateConfig: validateCollectionConfig },
   { id: "tasks.waiting", title: "等待与跟进", description: "等待回复、确认或外部条件的任务", surfaces: both, pack: "tasks", refresh: "live", defaultSize: { width: 5, height: 4 }, validateConfig: validateCollectionConfig },

@@ -1,0 +1,212 @@
+import { describe, expect, it } from "vitest";
+import type { TaskRecord } from "../src/core/types";
+import {
+  buildProjectReviewAiPrompt,
+  buildProjectReviewEvidence,
+  PROJECT_DEVELOPMENT_STAGES,
+  projectReviewCandidates,
+  projectStatusForDecision,
+  projectReviewTriggers,
+  serializeProjectReviewEvidence
+} from "../src/domain/project-review";
+import { ProjectReviewService } from "../src/services/project-review-service";
+import { WriteTransactionExecutor } from "../src/services/transaction-service";
+import type { VaultFileInfo, VaultPort } from "../src/services/vault-port";
+import type { EntitySummary } from "../src/ui/controller";
+
+class MemoryVault implements VaultPort {
+  readonly files = new Map<string, { content: string; mtime: number }>();
+  private clock = 1;
+
+  seed(path: string, content: string): void {
+    this.files.set(path, { content, mtime: this.clock++ });
+  }
+
+  async listMarkdownFiles(folder: string): Promise<VaultFileInfo[]> {
+    return [...this.files.entries()]
+      .filter(([path]) => path.startsWith(`${folder}/`) && path.endsWith(".md"))
+      .map(([path, value]) => ({ path, mtime: value.mtime, size: value.content.length }));
+  }
+
+  async read(path: string): Promise<string> {
+    const file = this.files.get(path);
+    if (!file) throw new Error(`Missing: ${path}`);
+    return file.content;
+  }
+
+  async write(path: string, content: string): Promise<void> {
+    if (!this.files.has(path)) throw new Error(`Missing: ${path}`);
+    this.files.set(path, { content, mtime: this.clock++ });
+  }
+
+  async create(path: string, content: string): Promise<void> {
+    if (this.files.has(path)) throw new Error(`Exists: ${path}`);
+    this.files.set(path, { content, mtime: this.clock++ });
+  }
+
+  async trash(path: string): Promise<void> {
+    this.files.delete(path);
+  }
+
+  async exists(path: string): Promise<boolean> {
+    return this.files.has(path);
+  }
+
+  async stat(path: string): Promise<VaultFileInfo | undefined> {
+    const file = this.files.get(path);
+    return file ? { path, mtime: file.mtime, size: file.content.length } : undefined;
+  }
+}
+
+function project(patch: Partial<EntitySummary> = {}): EntitySummary {
+  return {
+    kind: "project",
+    name: "热控设计",
+    path: "projects/热控设计.md",
+    status: "推进中",
+    ...patch
+  };
+}
+
+function task(patch: Partial<TaskRecord> = {}): TaskRecord {
+  return {
+    id: "task",
+    scope: "project",
+    path: "projects/热控设计.md",
+    line: 10,
+    text: "完成接口评审",
+    completed: false,
+    sourceName: "热控设计",
+    revision: "r1",
+    ...patch
+  };
+}
+
+describe("project review evidence", () => {
+  it("derives review triggers and a stable candidate order", () => {
+    const active = project({ reviewStatus: "待审议", reviewTrigger: "报价冻结", reviewDue: "2026-08-30" });
+    const overdue = project({ name: "逾期项目", path: "projects/逾期.md", nextAction: "跟进客户" });
+    const overdueTask = task({ path: "projects/逾期.md", due: "2026-08-20" });
+    expect(projectReviewTriggers(active, "2026-08-29")).toEqual(["报价冻结", "缺少明确下一步"]);
+    expect(projectReviewTriggers(overdue, "2026-08-29", [overdueTask])).toEqual(["1 项任务逾期"]);
+    expect(projectReviewCandidates([active, overdue], "2026-08-29", [overdueTask]).map((entry) => entry.name)).toEqual(["热控设计", "逾期项目"]);
+    expect(projectStatusForDecision("停止")).toBe("归档");
+  });
+
+  it("keeps evidence scoped to the selected project and related meetings", () => {
+    const evidence = buildProjectReviewEvidence(
+      project({ due: "2026-08-28", detail: "完成热设计评审" }),
+      [
+        task({ id: "late", due: "2026-08-28" }),
+        task({ id: "soon", due: "2026-09-01", text: "等待客户确认" }),
+        task({ id: "other", path: "projects/其他.md" })
+      ],
+      [
+        { kind: "meeting", name: "设计评审会", path: "meetings/review.md", project: "[[热控设计]]" },
+        { kind: "meeting", name: "其他会议", path: "meetings/other.md", project: "[[其他项目]]" }
+      ],
+      "2026-08-29"
+    );
+    expect(evidence.tasks).toHaveLength(2);
+    expect(evidence.overdueTasks.map((entry) => entry.id)).toEqual(["late"]);
+    expect(evidence.upcomingTasks.map((entry) => entry.id)).toEqual(["soon"]);
+    expect(evidence.waitingTasks.map((entry) => entry.id)).toEqual(["soon"]);
+    expect(evidence.meetings.map((entry) => entry.name)).toEqual(["设计评审会"]);
+    expect(evidence.health.reasons).not.toContain("项目目标日期已过");
+  });
+
+  it("builds a bounded read-only evidence package for the YOLO skill", () => {
+    const evidence = buildProjectReviewEvidence(
+      project({ client: "晨星实验室", due: "2026-08-28", nextAction: "补齐试验数据" }),
+      [task({ due: "2026-08-28", priority: "high" })],
+      [{ kind: "meeting", name: "设计评审会", path: "meetings/review.md", project: "[[热控设计]]" }],
+      "2026-08-29"
+    );
+    const prompt = buildProjectReviewAiPrompt(evidence, "2026-08-29");
+    const payload = serializeProjectReviewEvidence(evidence, "2026-08-29");
+    expect(prompt).toContain("project-review");
+    expect(prompt).toContain("不要把审阅当成一次性处理");
+    expect(prompt).toContain("不要修改任何文件");
+    expect(payload).toContain("# Asterism 项目审阅证据包");
+    expect(payload).toContain("- 客户：晨星实验室");
+    expect(payload).not.toContain("截止日期");
+    expect(payload).toContain("完成接口评审｜2026-08-28｜high");
+    expect(payload).toContain("设计评审会｜meetings/review.md");
+  });
+});
+
+describe("ProjectReviewService", () => {
+  it("uses a concise thermal-control development vocabulary", () => {
+    expect(PROJECT_DEVELOPMENT_STAGES).toEqual([
+      "方案定义",
+      "设计定型",
+      "投产制造",
+      "集成实施",
+      "试验验证",
+      "在轨运行"
+    ]);
+  });
+
+  it("updates review metadata and appends a trace without changing the project template", async () => {
+    const vault = new MemoryVault();
+    const original = [
+      "---",
+      "type: 项目",
+      "status: 推进中",
+      "custom_field: keep-me",
+      "review_due: 2026-08-01",
+      "---",
+      "# 热控设计",
+      "",
+      "## 项目概况",
+      "模板正文保持不变。",
+      "",
+      "## 推进记录",
+      "",
+      "| 日期 | 摘要 |",
+      "|---|---|",
+      "| 2026-08-20 | 完成初审 |",
+      "",
+      "## 待办",
+      "- [ ] 下一步"
+    ].join("\n");
+    vault.seed("projects/热控设计.md", original);
+    const service = new ProjectReviewService(vault, new WriteTransactionExecutor(vault));
+
+    const receipt = await service.save({
+      projectPath: "projects/热控设计.md",
+      decision: "附条件通过",
+      reviewDue: "2026-09-15",
+      note: "补齐试验数据",
+      phase: "试验验证",
+      nextAction: "完成热真空试验",
+      task: { text: "准备热真空试验数据", due: "2026-09-10" }
+    }, new Date(2026, 7, 29, 12));
+
+    const after = await vault.read("projects/热控设计.md");
+    expect(receipt.status).toBe("committed");
+    expect(after).toContain("custom_field: keep-me");
+    expect(after).toContain('review_status: "附条件通过"');
+    expect(after).toContain('status: "推进中"');
+    expect(after).toContain('phase: "试验验证"');
+    expect(after).toContain('next_action: "完成热真空试验"');
+    expect(after).toContain('review_due: "2026-09-15"');
+    expect(after).toContain('review_note: "补齐试验数据"');
+    expect(after).toContain('last_review: "2026-08-29"');
+    expect(after).toContain("模板正文保持不变。");
+    expect(after).toContain("- 2026-08-29：项目审阅结论为「附条件通过」；状态更新为「推进中」；研制阶段「试验验证」；下一步：完成热真空试验；补齐试验数据；复审 2026-09-15");
+    expect(after).toContain("- [ ] 准备热真空试验数据 📅 2026-09-10 ^qwb-");
+    expect(after).toContain("| 2026-08-20 | 完成初审 |");
+  });
+
+  it("rejects conditional approval without a review date before writing", async () => {
+    const vault = new MemoryVault();
+    const original = "---\ntype: 项目\n---\n# 项目";
+    vault.seed("projects/热控设计.md", original);
+    const service = new ProjectReviewService(vault, new WriteTransactionExecutor(vault));
+
+    await expect(service.save({ projectPath: "projects/热控设计.md", decision: "附条件通过" }))
+      .rejects.toThrow("复审日期");
+    expect(await vault.read("projects/热控设计.md")).toBe(original);
+  });
+});

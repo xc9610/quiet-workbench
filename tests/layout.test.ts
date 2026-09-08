@@ -3,6 +3,7 @@ import {
   adaptLayoutForDevice,
   ensureActivityHeatmap,
   ensureContextSidebarLayouts,
+  ensureUnscheduledTaskList,
   ensureSingleWorkbenchLayout,
   getDefaultLayouts,
   importLayout,
@@ -70,7 +71,7 @@ describe("Xove-compatible ordered grid", () => {
 describe("default layouts", () => {
   const registry = createBuiltinWidgetRegistry();
 
-  it("provides one primary workbench plus legacy-compatible layouts and contextual sidebars", () => {
+  it("provides one primary workbench plus migration-only legacy layouts and contextual sidebars", () => {
     const defaults = getDefaultLayouts();
     expect(defaults.filter((layout) => layout.surface === "workbench").map((layout) => layout.id)).toEqual([
       "workbench",
@@ -105,6 +106,15 @@ describe("default layouts", () => {
     expect(ensureActivityHeatmap(upgraded)).toEqual(upgraded);
   });
 
+  it("adds one unscheduled task list without replacing customized components", () => {
+    const workbench = getDefaultLayouts().find((layout) => layout.id === "workbench")!;
+    workbench.items[0].title = "我的今日焦点";
+    const upgraded = ensureUnscheduledTaskList([workbench]);
+    expect(upgraded[0].items[0].title).toBe("我的今日焦点");
+    expect(upgraded[0].items.filter((item) => item.presetId === "tasks.unscheduled")).toHaveLength(1);
+    expect(ensureUnscheduledTaskList(upgraded)).toEqual(upgraded);
+  });
+
   it("returns defensive copies", () => {
     const first = getDefaultLayouts();
     first[0].name = "Changed";
@@ -114,16 +124,18 @@ describe("default layouts", () => {
     expect(second[0].items[0].x).toBe(0);
   });
 
-  it("creates the single workbench from the last active customized layout without removing legacy backups", () => {
-    const legacy = getDefaultLayouts().filter((layout) => layout.id !== "workbench");
-    const projects = legacy.find((layout) => layout.id === "projects")!;
+  it("creates one workbench from the last active legacy layout and removes duplicate workbench tabs", () => {
+    const defaultWorkbench = getDefaultLayouts().find((layout) => layout.id === "workbench")!;
+    const projects = { ...structuredClone(defaultWorkbench), id: "projects", name: "项目管理" };
+    const legacy = getDefaultLayouts().filter((layout) => layout.surface === "sidebar").concat(projects);
     projects.items[0].width = 7;
     const migrated = ensureSingleWorkbenchLayout(legacy, "projects");
     const workbench = migrated.find((layout) => layout.id === "workbench")!;
     expect(workbench.name).toBe("工作台");
     expect(workbench.items).toEqual(projects.items);
     expect(workbench.items).not.toBe(projects.items);
-    expect(migrated.some((layout) => layout.id === "projects")).toBe(true);
+    expect(migrated.filter((layout) => layout.surface === "workbench")).toHaveLength(1);
+    expect(migrated.some((layout) => layout.id === "projects")).toBe(false);
     expect(ensureSingleWorkbenchLayout(migrated, "today")).toEqual(migrated);
   });
 

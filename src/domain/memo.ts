@@ -16,7 +16,7 @@ export function appendQuickMemoContent(
 ): string {
   const normalizedEntry = normalizeQuickMemoEntry(entry);
   const listItem = formatListItem(normalizedEntry, timestamp.time);
-  if (!content) return `# Workbench速记\n\n## ${timestamp.date}\n\n${listItem}\n`;
+  if (!content) return `# Asterism 速记\n\n## ${timestamp.date}\n\n${listItem}\n`;
 
   const lastDate = [...content.replace(/\r\n?/gu, "\n").matchAll(/^##\s+(\d{4}-\d{2}-\d{2})\s*$/gmu)].at(-1)?.[1];
   if (lastDate === timestamp.date) {

@@ -1,0 +1,1265 @@
+/* Shared navigation for the three primary Asterism pages. */
+.qwb-page-nav { flex-wrap: nowrap; }
+
+.qwb-page-nav-divider {
+  align-self: center;
+  width: 1px;
+  height: 20px;
+  margin: 0 2px;
+  background: var(--qwb-line-soft, var(--background-modifier-border));
+}
+
+.qwb-page-nav [aria-current="page"] {
+  border-color: color-mix(in srgb, var(--interactive-accent) 42%, var(--qwb-line-soft, var(--background-modifier-border))) !important;
+  background: color-mix(in srgb, var(--interactive-accent) 12%, var(--background-primary)) !important;
+  color: var(--text-accent) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--interactive-accent) 7%, transparent) !important;
+}
+
+.qwb-page-nav [aria-current="page"]::after {
+  position: absolute;
+  right: 5px;
+  bottom: 4px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--interactive-accent);
+  content: "";
+}
+
+.qwb-page-nav button { position: relative; }
+
+@media (max-width: 699px) {
+  .qwb-task-board-actions .qwb-task-board-write-state { display: none; }
+  .qwb-page-nav-divider:first-of-type { display: none; }
+}
+
+.qwb-board {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  padding-bottom: 5px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+}
+
+.qwb-board > section,
+.qwb-quadrants > section,
+.qwb-date-groups > section,
+.qwb-matrix > section {
+  padding: 8px;
+  border: 1px solid var(--qwb-border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--background-secondary) 82%, transparent);
+}
+
+.qwb-board > section {
+  display: flex;
+  min-width: 220px;
+  max-width: 340px;
+  min-height: 0;
+  flex: 1 0 240px;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.qwb-board header,
+.qwb-quadrants header,
+.qwb-date-groups header,
+.qwb-matrix-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 7px;
+}
+
+.qwb-board > section > header {
+  position: sticky;
+  z-index: 1;
+  top: 0;
+  flex: 0 0 auto;
+  padding-bottom: 7px;
+  background: color-mix(in srgb, var(--background-secondary) 94%, transparent);
+}
+
+.qwb-board-column-body {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 7px;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scrollbar-width: none;
+}
+
+.qwb-board-column-body::-webkit-scrollbar {
+  width: 0;
+}
+
+.qwb-board header strong,
+.qwb-quadrants header strong,
+.qwb-date-groups header strong {
+  font-size: 10px;
+}
+
+.qwb-quadrants section > button,
+.qwb-date-groups section > button,
+.qwb-matrix section > button:not(.qwb-matrix-heading) {
+  display: grid;
+  width: 100%;
+  gap: 4px;
+  margin-bottom: 6px;
+  padding: 8px;
+  border: 1px solid var(--qwb-border);
+  border-radius: 8px;
+  background: var(--background-primary);
+  box-shadow: none;
+  color: var(--text-normal);
+  font-size: 10px;
+  text-align: left;
+}
+
+.qwb-board-card {
+  width: 100%;
+  flex: 0 0 auto;
+  overflow: hidden;
+  border: 1px solid var(--qwb-border);
+  border-radius: 9px;
+  background: var(--background-primary);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--background-modifier-box-shadow) 24%, transparent);
+  position: relative;
+}
+
+.qwb-board-card-main {
+  display: flex !important;
+  width: 100% !important;
+  height: auto !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  padding: 9px 10px !important;
+  align-items: stretch !important;
+  justify-content: flex-start !important;
+  flex-direction: column !important;
+  gap: 4px !important;
+  overflow: hidden;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: var(--text-normal) !important;
+  font-size: 10px !important;
+  line-height: 1.35 !important;
+  text-align: left !important;
+  white-space: normal !important;
+}
+
+.qwb-board-card-main:hover {
+  background: var(--background-modifier-hover) !important;
+}
+
+.qwb-board-card-main strong,
+.qwb-board-card-main small,
+.qwb-board-card-main time {
+  display: block;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.qwb-board-card-main strong {
+  color: var(--text-normal);
+  font-weight: 600;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.qwb-board-card-main small,
+.qwb-board-card-main time,
+.qwb-quadrants small,
+.qwb-date-groups small,
+.qwb-matrix time {
+  color: var(--text-faint);
+  font-size: 8.5px;
+}
+
+.qwb-board-card-main small,
+.qwb-board-card-main time {
+  white-space: nowrap;
+}
+
+.qwb-board section > p,
+.qwb-quadrants section > p {
+  color: var(--text-faint);
+  font-size: 9px;
+  text-align: center;
+}
+
+.qwb-quadrants {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.qwb-quadrant-important-urgent { border-top-color: var(--color-red) !important; }
+.qwb-quadrant-important { border-top-color: var(--color-blue) !important; }
+.qwb-quadrant-urgent { border-top-color: var(--color-orange) !important; }
+.qwb-quadrant-later { border-top-color: var(--text-faint) !important; }
+
+.qwb-date-groups,
+.qwb-matrix,
+.qwb-health-list,
+.qwb-progress-list,
+.qwb-risk-list,
+.qwb-activity-list,
+.qwb-project-table,
+.qwb-project-search-results,
+.qwb-timeline,
+.qwb-relations {
+  display: grid;
+  gap: 7px;
+}
+
+.qwb-date-groups {
+  display: flex;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  padding-bottom: 4px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+}
+
+.qwb-date-groups > section {
+  display: flex;
+  min-width: 220px;
+  min-height: 0;
+  flex: 1 0 220px;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.qwb-date-groups > section > header {
+  flex: 0 0 auto;
+}
+
+.qwb-date-column-body {
+  min-height: 0;
+  padding-right: 2px;
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scrollbar-width: thin;
+}
+
+.qwb-date-column-body > button {
+  display: grid !important;
+  width: 100% !important;
+  height: auto !important;
+  min-width: 0 !important;
+  min-height: 56px !important;
+  margin: 0 0 7px !important;
+  padding: 9px 10px !important;
+  align-content: start !important;
+  justify-content: stretch !important;
+  gap: 5px !important;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--qwb-border) !important;
+  border-radius: 8px !important;
+  background: var(--background-primary) !important;
+  box-shadow: none !important;
+  color: var(--text-normal) !important;
+  font-size: 10px !important;
+  line-height: 1.4 !important;
+  text-align: left !important;
+  white-space: normal !important;
+}
+
+.qwb-date-column-body > button:hover {
+  background: var(--background-modifier-hover) !important;
+}
+
+.qwb-date-column-body > button span,
+.qwb-date-column-body > button small {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.qwb-date-column-body > button span {
+  display: -webkit-box;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.qwb-date-column-body > button small {
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qwb-month-calendar {
+  display: grid;
+  grid-template-rows: auto auto auto minmax(92px, 1fr);
+  gap: 8px;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.qwb-month-calendar-toolbar {
+  display: grid;
+  grid-template-columns: 28px minmax(110px, 1fr) auto 28px;
+  align-items: center;
+  gap: 6px;
+}
+
+.qwb-month-calendar-toolbar > strong {
+  font-size: 12px;
+  text-align: center;
+}
+
+.qwb-month-calendar-toolbar > button {
+  display: grid !important;
+  width: 28px !important;
+  height: 28px !important;
+  min-width: 28px !important;
+  min-height: 28px !important;
+  padding: 0 !important;
+  place-items: center;
+  border: 1px solid var(--qwb-border) !important;
+  border-radius: 8px !important;
+  background: var(--background-secondary) !important;
+  box-shadow: none !important;
+  color: var(--text-muted) !important;
+}
+
+.qwb-month-calendar-toolbar > button:hover {
+  border-color: var(--interactive-accent) !important;
+  color: var(--text-accent) !important;
+}
+
+.qwb-month-calendar-toolbar > button.active {
+  border-color: color-mix(in srgb, var(--interactive-accent) 65%, var(--qwb-border)) !important;
+  background: var(--qwb-accent-soft) !important;
+  color: var(--text-accent) !important;
+}
+
+.qwb-month-calendar-toolbar > button svg {
+  width: 14px;
+  height: 14px;
+}
+
+.qwb-month-calendar-toolbar > .qwb-calendar-today {
+  width: auto !important;
+  min-width: 42px !important;
+  padding: 0 9px !important;
+  font-size: 9px !important;
+}
+
+.qwb-month-calendar-weekdays,
+.qwb-month-calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.qwb-month-calendar-weekdays {
+  color: var(--text-faint);
+  font-size: 8.5px;
+  text-align: center;
+}
+
+.qwb-month-calendar-grid {
+  grid-template-rows: repeat(6, 44px);
+  gap: 3px;
+  min-height: 0;
+  align-self: start;
+}
+
+.qwb-month-calendar-grid > button {
+  position: relative;
+  display: grid !important;
+  grid-template-rows: auto 1fr;
+  width: 100% !important;
+  height: auto !important;
+  min-width: 0 !important;
+  min-height: 44px !important;
+  padding: 5px 6px !important;
+  align-content: start !important;
+  justify-items: start !important;
+  overflow: hidden;
+  border: 1px solid var(--qwb-border) !important;
+  border-radius: 7px !important;
+  background: var(--background-primary) !important;
+  box-shadow: none !important;
+  color: var(--text-normal) !important;
+}
+
+.qwb-month-calendar-grid > button:hover {
+  background: var(--background-modifier-hover) !important;
+}
+
+.qwb-month-calendar-grid > button.outside {
+  background: color-mix(in srgb, var(--background-secondary) 74%, transparent) !important;
+  color: var(--text-faint) !important;
+  opacity: .62;
+}
+
+.qwb-month-calendar-grid > button.today {
+  border-color: color-mix(in srgb, var(--interactive-accent) 78%, var(--qwb-border)) !important;
+}
+
+.qwb-month-calendar-grid > button.selected {
+  border-color: var(--interactive-accent) !important;
+  background: var(--qwb-accent-soft) !important;
+  color: var(--text-accent) !important;
+}
+
+.qwb-month-calendar-grid time {
+  font-size: 9px;
+  font-weight: 650;
+  line-height: 1;
+}
+
+.qwb-calendar-dots {
+  display: flex;
+  min-width: 0;
+  align-self: end;
+  align-items: center;
+  gap: 3px;
+  padding-top: 4px;
+}
+
+.qwb-calendar-dots i,
+.qwb-calendar-detail button > i {
+  width: 5px;
+  height: 5px;
+  flex: 0 0 5px;
+  border-radius: 50%;
+  background: var(--interactive-accent);
+}
+
+.qwb-calendar-dots i.meeting,
+.qwb-calendar-detail button > i.meeting { background: var(--color-purple); }
+.qwb-calendar-dots i.event,
+.qwb-calendar-detail button > i.event { background: var(--color-cyan); }
+.qwb-calendar-dots i.overdue,
+.qwb-calendar-detail button > i.overdue { background: var(--color-red); }
+.qwb-calendar-dots i.completed,
+.qwb-calendar-detail button > i.completed { background: var(--text-faint); }
+
+.qwb-calendar-dots small {
+  color: var(--text-muted);
+  font-size: 7px;
+  font-weight: 650;
+  line-height: 1;
+}
+
+.qwb-calendar-detail {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  padding-top: 8px;
+  overflow: hidden;
+  border-top: 1px solid var(--qwb-border);
+}
+
+.qwb-calendar-detail > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 2px 6px;
+}
+
+.qwb-calendar-detail > header strong { font-size: 10px; }
+.qwb-calendar-detail > header span { color: var(--text-faint); font-size: 8.5px; }
+
+.qwb-calendar-detail > div {
+  min-width: 0;
+  min-height: 0;
+  padding-right: 2px;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scrollbar-width: thin;
+}
+
+.qwb-calendar-detail button {
+  display: grid !important;
+  grid-template-columns: 7px minmax(0, 1fr) auto;
+  align-items: center !important;
+  gap: 8px !important;
+  width: 100% !important;
+  height: auto !important;
+  min-width: 0 !important;
+  min-height: 43px !important;
+  margin-bottom: 5px !important;
+  padding: 7px 9px !important;
+  overflow: hidden;
+  border: 1px solid var(--qwb-border) !important;
+  border-radius: 8px !important;
+  background: var(--background-primary) !important;
+  box-shadow: none !important;
+  color: var(--text-normal) !important;
+  text-align: left !important;
+}
+
+.qwb-calendar-detail button:hover { background: var(--background-modifier-hover) !important; }
+.qwb-calendar-detail button.completed { opacity: .58; }
+.qwb-calendar-detail button.overdue em { color: var(--color-red); }
+
+.qwb-calendar-detail button > span {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.qwb-calendar-detail button strong,
+.qwb-calendar-detail button small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qwb-calendar-detail button strong { font-size: 9.5px; }
+.qwb-calendar-detail button small { color: var(--text-faint); font-size: 8px; }
+.qwb-calendar-detail button em { color: var(--text-muted); font-size: 8px; font-style: normal; white-space: nowrap; }
+
+.qwb-schedule-task {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--qwb-border);
+  border-radius: 9px;
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  font-weight: 650;
+}
+
+@container (max-width: 420px) {
+  .qwb-month-calendar { grid-template-rows: auto auto auto minmax(86px, 1fr); }
+  .qwb-month-calendar-grid { grid-template-rows: repeat(6, 44px); min-height: 0; }
+  .qwb-month-calendar-grid > button { padding: 4px !important; }
+  .qwb-calendar-dots { gap: 2px; }
+  .qwb-calendar-detail button em { display: none; }
+}
+
+.qwb-schedule-overview {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 10px;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.qwb-schedule-overview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 9px;
+  border-bottom: 1px solid var(--qwb-border);
+}
+
+.qwb-schedule-overview-header > span {
+  display: grid;
+  gap: 2px;
+}
+
+.qwb-schedule-overview-header strong { font-size: 12px; }
+.qwb-schedule-overview-header small { color: var(--text-muted); font-size: 9px; }
+
+.qwb-schedule-overview-header > button {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  min-height: 36px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid var(--qwb-border);
+  border-radius: 9px;
+  background: var(--background-primary);
+  color: var(--text-muted);
+}
+
+.qwb-schedule-overview-header > button.active {
+  border-color: color-mix(in srgb, var(--interactive-accent) 45%, var(--qwb-border));
+  color: var(--text-accent);
+}
+
+.qwb-schedule-overview-header > button svg { width: 16px; height: 16px; }
+
+.qwb-schedule-agenda {
+  min-width: 0;
+  min-height: 0;
+  padding-right: 3px;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scrollbar-width: thin;
+}
+
+.qwb-schedule-agenda > section {
+  display: grid;
+  grid-template-columns: minmax(92px, .42fr) minmax(0, 2fr);
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--qwb-border);
+}
+
+.qwb-schedule-agenda > section > header {
+  display: grid;
+  align-content: start;
+  gap: 3px;
+  padding: 5px 2px;
+}
+
+.qwb-schedule-agenda > section > header time { font-size: 10px; font-weight: 700; }
+.qwb-schedule-agenda > section > header span { color: var(--text-faint); font-size: 8px; }
+.qwb-schedule-agenda > section > div { display: grid; gap: 6px; min-width: 0; }
+
+.qwb-schedule-agenda section button {
+  display: grid;
+  grid-template-columns: 48px 7px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  min-height: 46px;
+  padding: 7px 9px;
+  overflow: hidden;
+  border: 1px solid var(--qwb-border);
+  border-radius: 9px;
+  background: var(--background-primary);
+  box-shadow: none;
+  color: var(--text-normal);
+  text-align: left;
+}
+
+.qwb-schedule-agenda section button:hover { background: var(--background-modifier-hover); }
+.qwb-schedule-agenda section button.completed { opacity: .58; }
+.qwb-schedule-agenda section button > time { color: var(--text-muted); font-size: 8.5px; }
+
+.qwb-schedule-agenda section button > i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--interactive-accent);
+}
+
+.qwb-schedule-agenda section button > i.meeting { background: var(--color-purple); }
+.qwb-schedule-agenda section button > i.event { background: var(--color-cyan); }
+.qwb-schedule-agenda section button > i.completed { background: var(--text-faint); }
+.qwb-schedule-agenda section button > span { display: grid; min-width: 0; gap: 2px; }
+.qwb-schedule-agenda section button strong,
+.qwb-schedule-agenda section button small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qwb-schedule-agenda section button strong { font-size: 10px; }
+.qwb-schedule-agenda section button small { color: var(--text-faint); font-size: 8px; }
+.qwb-schedule-agenda section button em { color: var(--text-muted); font-size: 8px; font-style: normal; white-space: nowrap; }
+
+.qwb-schedule-empty {
+  display: grid;
+  min-height: 150px;
+  place-content: center;
+  justify-items: center;
+  gap: 5px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.qwb-schedule-empty i { width: 22px; height: 22px; color: var(--text-accent); }
+.qwb-schedule-empty strong { font-size: 11px; }
+.qwb-schedule-empty small { color: var(--text-faint); font-size: 9px; }
+
+@container (max-width: 520px) {
+  .qwb-schedule-agenda > section { grid-template-columns: 1fr; gap: 5px; }
+  .qwb-schedule-agenda > section > header { display: flex; align-items: center; justify-content: space-between; }
+  .qwb-schedule-agenda section button { grid-template-columns: 42px 7px minmax(0, 1fr); }
+  .qwb-schedule-agenda section button em { display: none; }
+}
+
+.qwb-matrix {
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+}
+
+.qwb-matrix-heading {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-normal);
+}
+
+.qwb-workload {
+  display: grid;
+  gap: 9px;
+}
+
+.qwb-workload > div {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) 22px;
+  gap: 8px;
+  align-items: center;
+  font-size: 9px;
+}
+
+.qwb-workload span,
+.qwb-progress-list button > div {
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--background-modifier-hover);
+}
+
+.qwb-workload i,
+.qwb-progress-list button > div i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--interactive-accent);
+}
+
+.qwb-timeline section {
+  display: grid;
+  grid-template-columns: 78px minmax(0, 1fr);
+  gap: 10px;
+}
+
+.qwb-timeline section > time {
+  padding-top: 6px;
+  color: var(--text-muted);
+  font-size: 9px;
+}
+
+.qwb-timeline section > div {
+  display: grid;
+  gap: 5px;
+  padding-left: 10px;
+  border-left: 2px solid var(--qwb-border);
+}
+
+.qwb-timeline button,
+.qwb-project-search-results > div,
+.qwb-project-table > button,
+.qwb-health-list > button,
+.qwb-progress-list > button,
+.qwb-risk-list > button,
+.qwb-activity-list > button {
+  border: 1px solid var(--qwb-border);
+  border-radius: 9px;
+  background: var(--background-primary);
+  box-shadow: none;
+  color: var(--text-normal);
+  text-align: left;
+}
+
+.qwb-timeline button {
+  display: grid;
+  gap: 2px;
+  padding: 7px 9px;
+}
+
+.qwb-timeline small {
+  color: var(--text-faint);
+  font-size: 8.5px;
+}
+
+.qwb-project-search-results > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  padding: 4px;
+}
+
+.qwb-project-search-results > div.active {
+  border-color: var(--interactive-accent);
+}
+
+.qwb-project-search-results button {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-normal);
+  text-align: left;
+}
+
+.qwb-shared-project {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 6px;
+  align-items: center;
+  padding: 8px 9px;
+  border: 1px solid color-mix(in srgb, var(--interactive-accent) 48%, var(--qwb-border));
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--interactive-accent) 8%, var(--background-primary));
+}
+
+.qwb-shared-project span,
+.qwb-project-choice {
+  display: grid;
+  min-width: 0;
+}
+
+.qwb-shared-project small {
+  color: var(--text-faint);
+  font-size: 8px;
+}
+
+.qwb-project-choice span {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 3px;
+}
+
+.qwb-project-choice span small {
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: var(--background-secondary);
+}
+
+.qwb-project-choice-actions {
+  display: flex;
+  gap: 3px;
+}
+
+.qwb-project-choice-actions button {
+  padding: 5px 7px;
+  border-radius: 7px;
+  color: var(--text-muted);
+}
+
+.qwb-project-choice-actions button.active {
+  color: var(--interactive-accent);
+}
+
+.qwb-project-search-results small,
+.qwb-project-table small,
+.qwb-health-list small,
+.qwb-progress-list small,
+.qwb-activity-list small {
+  color: var(--text-muted);
+  font-size: 9px;
+}
+
+.qwb-project-table > button {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 4px 8px;
+  align-items: center;
+  height: auto;
+  min-height: 52px;
+  padding: 9px 10px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.qwb-client-list {
+  display: grid;
+  gap: 7px;
+}
+
+.qwb-client-list > button {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  gap: 5px 9px;
+  align-items: center;
+  width: 100%;
+  height: auto;
+  min-height: 54px;
+  padding: 9px 10px;
+  overflow: hidden;
+  border: 1px solid var(--qwb-border);
+  border-radius: 9px;
+  background: var(--background-primary);
+  box-shadow: none;
+  color: var(--text-normal);
+  text-align: left;
+}
+
+.qwb-client-list > button:hover {
+  background: var(--background-modifier-hover);
+}
+
+.qwb-client-list > button > span:nth-child(2) {
+  display: grid;
+  min-width: 0;
+}
+
+.qwb-client-list strong,
+.qwb-client-list small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qwb-client-list small,
+.qwb-client-list em,
+.qwb-client-list time {
+  color: var(--text-muted);
+  font-size: 9px;
+  font-style: normal;
+}
+
+@container (max-width: 520px) {
+  .qwb-client-list > button {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .qwb-client-list > button > time {
+    grid-column: 2 / -1;
+    justify-self: start;
+  }
+}
+
+@container (max-width: 340px) {
+  .qwb-client-list > button {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .qwb-client-list > button > em,
+  .qwb-client-list > button > time {
+    grid-column: 2;
+  }
+}
+
+.qwb-project-table > button > span {
+  grid-column: 1 / -1;
+}
+
+.qwb-project-table > button > time {
+  justify-self: end;
+}
+
+.qwb-project-table strong,
+.qwb-project-table small,
+.qwb-project-table em,
+.qwb-project-table time {
+  min-width: 0;
+}
+
+.qwb-project-table strong {
+  overflow: hidden;
+  color: var(--text-normal);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qwb-project-table em,
+.qwb-project-table time,
+.qwb-health-list em,
+.qwb-progress-list em,
+.qwb-risk-list em {
+  color: var(--text-muted);
+  font-size: 9px;
+  font-style: normal;
+}
+
+@container (max-width: 520px) {
+  .qwb-project-table > button {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+  }
+}
+
+@container (max-width: 340px) {
+  .qwb-project-table > button {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .qwb-project-table > button > em:first-of-type {
+    grid-column: 1;
+  }
+
+  .qwb-project-table > button > em:last-of-type {
+    grid-column: 2;
+    justify-self: end;
+  }
+
+  .qwb-project-table > button > time {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+}
+
+.qwb-project-summary {
+  display: grid;
+  gap: 10px;
+}
+
+.qwb-summary-title {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-normal);
+  text-align: left;
+}
+
+.qwb-summary-title > em {
+  margin-left: auto;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  font-size: 8.5px;
+  font-style: normal;
+}
+
+.qwb-summary-title > span:last-child {
+  display: grid;
+}
+
+.qwb-summary-title small,
+.qwb-project-summary p {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.qwb-project-next {
+  padding: 8px 9px;
+  border-left: 3px solid var(--interactive-accent);
+  border-radius: 0 8px 8px 0;
+  background: var(--background-secondary);
+}
+
+.qwb-project-next small {
+  color: var(--text-faint);
+  font-size: 8px;
+}
+
+.qwb-project-next p {
+  margin: 3px 0 0;
+  color: var(--text-normal);
+}
+
+.qwb-project-summary dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0;
+}
+
+.qwb-project-summary dl > div {
+  padding: 7px;
+  border-radius: 8px;
+  background: var(--background-secondary);
+}
+
+.qwb-project-summary dt {
+  color: var(--text-faint);
+  font-size: 8px;
+}
+
+.qwb-project-summary dd {
+  margin: 2px 0 0;
+  font-size: 10px;
+}
+
+.qwb-summary-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.qwb-health-list > button,
+.qwb-progress-list > button {
+  display: grid;
+  gap: 9px;
+  padding: 10px;
+}
+
+.qwb-health-list header,
+.qwb-progress-list header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.qwb-health-list header > span,
+.qwb-progress-list header > span {
+  display: grid;
+  min-width: 0;
+}
+
+.qwb-health-list header > i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--text-faint);
+}
+
+.qwb-health-list header > i.healthy { background: var(--color-green); }
+.qwb-health-list header > i.attention { background: var(--color-orange); }
+.qwb-health-list header > i.risk { background: var(--color-red); }
+
+.qwb-health-list header > em.healthy { color: var(--color-green); }
+.qwb-health-list header > em.attention { color: var(--color-orange); }
+.qwb-health-list header > em.risk { color: var(--color-red); }
+
+.qwb-health-list p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 9px;
+}
+
+.qwb-health-list dl,
+.qwb-progress-list dl {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 5px;
+  margin: 0;
+}
+
+.qwb-health-list dl > div,
+.qwb-progress-list dl > div {
+  padding: 5px 6px;
+  border-radius: 7px;
+  background: var(--background-secondary);
+}
+
+.qwb-health-list dt,
+.qwb-progress-list dt {
+  color: var(--text-faint);
+  font-size: 7.5px;
+}
+
+.qwb-health-list dd,
+.qwb-progress-list dd {
+  margin: 2px 0 0;
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.qwb-progress-track {
+  width: 100%;
+}
+
+.qwb-risk-list > button {
+  display: grid;
+  grid-template-columns: minmax(100px, .7fr) minmax(140px, 1fr) auto;
+  gap: 9px;
+  align-items: center;
+  padding: 8px;
+}
+
+.qwb-risk-list span {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.qwb-risk-list small {
+  padding: 2px 5px;
+  border-radius: 999px;
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  font-size: 8.5px;
+}
+
+.qwb-risk-list em.risk { color: var(--color-red); }
+.qwb-risk-list em.attention { color: var(--color-orange); }
+
+.qwb-activity-list > button {
+  display: grid;
+  grid-template-columns: 80px minmax(0, 1fr);
+  gap: 8px;
+  padding: 8px;
+}
+
+.qwb-activity-list time {
+  color: var(--text-faint);
+  font-size: 9px;
+}
+
+.qwb-relations {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.qwb-relations section {
+  display: grid;
+  align-content: start;
+  gap: 5px;
+  padding: 8px;
+  border: 1px solid var(--qwb-border);
+  border-radius: 9px;
+  background: var(--background-secondary);
+}
+
+.qwb-relations strong {
+  font-size: 10px;
+}
+
+.qwb-relations button {
+  padding: 3px 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-accent);
+  font-size: 9px;
+  text-align: left;
+}
+
+.qwb-relations span {
+  color: var(--text-faint);
+  font-size: 9px;
+}
+
+@media (max-width: 699px) {
+  .qwb-library-grid,
+  .qwb-quadrants,
+  .qwb-relations,
+  .qwb-project-summary dl {
+    grid-template-columns: 1fr;
+  }
+
+  .qwb-board {
+    display: flex;
+    flex-direction: column;
+    height: auto;
+    overflow-x: visible;
+  }
+
+  .qwb-board > section {
+    width: 100%;
+    max-width: none;
+    min-height: 180px;
+    flex-basis: auto;
+  }
+
+  .qwb-project-table > button,
+  .qwb-risk-list > button,
+  .qwb-progress-list > button {
+    grid-template-columns: 1fr;
+  }
+
+  .qwb-shared-project,
+  .qwb-project-search-results > div {
+    grid-template-columns: 1fr;
+  }
+
+  .qwb-project-choice-actions {
+    justify-content: flex-start;
+  }
+
+  .qwb-health-list dl,
+  .qwb-progress-list dl {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

@@ -1,0 +1,253 @@
+/* Shared note-surface foundations. Global theme variants stay in Obsidian. */
+body.qwb-clear-mode {
+  --asterism-note-width: 980px;
+  --asterism-note-radius: 18px;
+}
+
+/* Shared Markdown note design. Templates only opt into this class; content and
+   frontmatter remain normal Markdown and continue working without the plugin. */
+:is(.markdown-preview-view, .markdown-source-view):is(.asterism-note, .entity-polish, .journal-grid) {
+  --asterism-note-line: color-mix(in srgb, var(--background-modifier-border) 86%, transparent);
+  --asterism-note-soft: color-mix(in srgb, var(--background-secondary) 76%, var(--background-primary));
+  --asterism-note-accent: color-mix(in srgb, var(--interactive-accent) 12%, transparent);
+  color: var(--text-normal);
+}
+
+.markdown-preview-view:is(.asterism-note, .entity-polish, .journal-grid) .markdown-preview-sizer,
+.markdown-source-view:is(.asterism-note, .entity-polish, .journal-grid) .cm-contentContainer {
+  width: min(100%, var(--asterism-note-width));
+  max-width: var(--asterism-note-width);
+  margin-inline: auto;
+}
+
+.markdown-preview-view:is(.asterism-note, .entity-polish, .journal-grid) .markdown-preview-sizer {
+  padding: clamp(30px, 5vw, 64px) clamp(22px, 5vw, 58px) 90px;
+}
+
+:is(.markdown-preview-view, .markdown-source-view):is(.asterism-note, .entity-polish, .journal-grid) .metadata-container {
+  margin-bottom: 28px;
+  padding: 14px 16px;
+  border: 1px solid var(--asterism-note-line);
+  border-radius: 13px;
+  background: var(--asterism-note-soft);
+}
+
+:is(.asterism-note, .entity-polish, .journal-grid) :is(.inline-title, h1) {
+  color: var(--text-normal);
+  font-weight: 720;
+  letter-spacing: -.035em;
+}
+
+.markdown-preview-view:is(.asterism-note, .entity-polish, .journal-grid) h1 {
+  margin: 10px 0 32px;
+  padding-bottom: 15px;
+  border-bottom: 1px solid var(--asterism-note-line);
+  font-size: clamp(2rem, 4.8vw, 3.25rem);
+}
+
+:is(.asterism-note, .entity-polish, .journal-grid) h2 {
+  margin-top: 36px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--asterism-note-line);
+  color: var(--text-normal);
+  font-size: 1.28rem;
+  font-weight: 680;
+}
+
+:is(.asterism-note, .entity-polish, .journal-grid) h3 {
+  margin-top: 28px;
+  color: var(--text-normal);
+  font-size: 1.05rem;
+  font-weight: 680;
+}
+
+:is(.asterism-note, .entity-polish, .journal-grid) :is(p, li) {
+  line-height: 1.78;
+}
+
+:is(.asterism-note, .entity-polish, .journal-grid) a {
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+:is(.asterism-note, .entity-polish, .journal-grid) :is(table, .callout, blockquote) {
+  border-color: var(--asterism-note-line);
+  border-radius: 13px;
+}
+
+:is(.asterism-note, .entity-polish, .journal-grid) table {
+  width: 100%;
+  overflow: hidden;
+}
+
+:is(.asterism-note, .entity-polish, .journal-grid) th {
+  background: var(--asterism-note-soft);
+  font-weight: 680;
+}
+
+:is(.asterism-note, .entity-polish, .journal-grid) .callout {
+  background: color-mix(in srgb, var(--asterism-note-soft) 82%, transparent);
+  box-shadow: none;
+}
+
+:is(.asterism-note, .entity-polish, .journal-grid) input[type="checkbox"] {
+  border-radius: 4px;
+}
+
+/* Project progress and client activity remain normal Markdown lists. Reading
+   mode adds a quiet timeline without changing source data used by automation. */
+.markdown-preview-view :is(.asterism-project-timeline, .asterism-client-timeline, .asterism-supplier-timeline),
+.markdown-preview-view.project-note h2:nth-of-type(2) + ul,
+.markdown-preview-view.client-note h2:nth-of-type(2) + ul,
+.markdown-preview-view.supplier-note h2:nth-of-type(3) + ul {
+  position: relative;
+  margin: 18px 0 8px;
+  padding-left: 25px;
+  list-style: none;
+}
+
+.markdown-preview-view :is(.asterism-project-timeline, .asterism-client-timeline, .asterism-supplier-timeline) > li,
+.markdown-preview-view:is(.project-note, .client-note) h2:nth-of-type(2) + ul > li,
+.markdown-preview-view.supplier-note h2:nth-of-type(3) + ul > li {
+  position: relative;
+  min-height: 34px;
+  margin: 0;
+  padding: 0 0 13px 11px;
+  line-height: 1.65;
+}
+
+.markdown-preview-view :is(.asterism-project-timeline, .asterism-client-timeline, .asterism-supplier-timeline) > li::before,
+.markdown-preview-view:is(.project-note, .client-note) h2:nth-of-type(2) + ul > li::before,
+.markdown-preview-view.supplier-note h2:nth-of-type(3) + ul > li::before {
+  position: absolute;
+  top: .58em;
+  left: -15px;
+  width: 8px;
+  height: 8px;
+  border: 2px solid var(--background-primary);
+  border-radius: 50%;
+  background: var(--interactive-accent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--interactive-accent) 38%, var(--asterism-note-line));
+  content: "";
+}
+
+.markdown-preview-view :is(.asterism-project-timeline, .asterism-client-timeline, .asterism-supplier-timeline) > li:not(:last-child)::after,
+.markdown-preview-view:is(.project-note, .client-note) h2:nth-of-type(2) + ul > li:not(:last-child)::after,
+.markdown-preview-view.supplier-note h2:nth-of-type(3) + ul > li:not(:last-child)::after {
+  position: absolute;
+  top: calc(.58em + 10px);
+  bottom: -2px;
+  left: -11px;
+  width: 1px;
+  background: color-mix(in srgb, var(--interactive-accent) 26%, var(--asterism-note-line));
+  content: "";
+}
+
+.asterism-related-files {
+  margin: 14px 0 6px;
+  padding: 12px;
+  border: 1px solid var(--asterism-note-line, var(--background-modifier-border));
+  border-radius: 13px;
+  background: color-mix(in srgb, var(--asterism-note-soft, var(--background-secondary)) 72%, transparent);
+}
+
+.asterism-related-files-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 9px;
+}
+
+.asterism-related-files-header strong {
+  font-size: .92rem;
+}
+
+.asterism-related-files-header span,
+.asterism-related-files-more,
+.asterism-related-files-empty {
+  color: var(--text-muted);
+  font-size: .78rem;
+}
+
+.asterism-related-files-list {
+  display: grid;
+  gap: 6px;
+}
+
+.asterism-related-file {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-height: 48px;
+  padding: 7px 9px;
+  border: 1px solid var(--asterism-note-line, var(--background-modifier-border));
+  border-radius: 10px;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  text-align: left;
+  cursor: pointer;
+}
+
+.asterism-related-file:hover {
+  border-color: color-mix(in srgb, var(--interactive-accent) 42%, var(--asterism-note-line));
+  background: color-mix(in srgb, var(--interactive-accent) 4%, var(--background-primary));
+}
+
+.asterism-related-file:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 2px;
+}
+
+.asterism-related-file-icon {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border-radius: 9px;
+  background: var(--asterism-note-accent, var(--background-secondary));
+  color: var(--text-accent);
+}
+
+.asterism-related-file-icon svg {
+  width: 17px;
+  height: 17px;
+}
+
+.asterism-related-file-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.asterism-related-file-copy strong {
+  overflow: hidden;
+  font-size: .86rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.asterism-related-file-copy small,
+.asterism-related-file-open {
+  color: var(--text-muted);
+  font-size: .72rem;
+}
+
+.asterism-related-file-open {
+  padding: 4px 7px;
+  border-radius: 7px;
+  background: var(--asterism-note-soft, var(--background-secondary));
+}
+
+.asterism-related-files-more {
+  display: block;
+  margin-top: 8px;
+}
+
+@media (max-width: 600px) {
+  .asterism-related-file-open {
+    display: none;
+  }
+}

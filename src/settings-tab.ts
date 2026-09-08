@@ -113,6 +113,17 @@ export class QuietWorkbenchSettingTab extends PluginSettingTab {
         })
       );
 
+    new Setting(containerEl)
+      .setName("启动时打开 Asterism")
+      .setDesc("Obsidian 工作区加载完成后，复用或新建 Asterism 工作台标签并切换到前台；不会关闭其他已打开的笔记。")
+      .addToggle((toggle) => toggle
+        .setValue(this.host.settings.openWorkbenchOnStartup)
+        .onChange(async (value) => {
+          this.host.settings.openWorkbenchOnStartup = value;
+          await this.host.saveSettings();
+          new Notice(value ? "Asterism 已设为启动主页" : "Asterism 启动主页已关闭");
+        }));
+
     new Setting(containerEl).setName("首页摘要").setHeading();
     new Setting(containerEl)
       .setName("Hero 文案模式")

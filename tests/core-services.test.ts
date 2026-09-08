@@ -3,11 +3,12 @@ import type { TaskRecord } from "../src/core/types";
 import { EntityIndex } from "../src/services/entity-index";
 import { MeetingMigrationService } from "../src/services/meeting-migration-service";
 import { ProjectTaskService } from "../src/services/task-service";
+import { TasksApiAdapter } from "../src/services/tasks-api-adapter";
 import { formatDate, TemplateService, UnsupportedTemplateExpressionError } from "../src/services/template-service";
 import { TransactionJournal, WriteTransactionExecutor } from "../src/services/transaction-service";
 import type { VaultFileInfo, VaultPort } from "../src/services/vault-port";
 import { canonicalizeFields, type EntityIndexConfig } from "../src/domain/entities";
-import { contentRevision, parseMarkdown } from "../src/domain/markdown";
+import { contentRevision, parseMarkdown, type ParsedTask } from "../src/domain/markdown";
 import { RevisionConflictError } from "../src/domain/transactions";
 
 class MemoryVault implements VaultPort {
@@ -392,6 +393,47 @@ describe("project tasks and meeting migration", () => {
     expect(await vault.read("projects/a.md")).not.toContain("📅");
   });
 
+  it("uses the public Tasks API for completion while keeping Asterism transactions", async () => {
+    const vault = new MemoryVault();
+    vault.seed("projects/a.md", "---\ntype: 项目\n---\n## 待办\n- [ ] 重复检查 🔁 every week 📅 2026-08-20 ^repeat-1");
+    const toggled: Array<{ line: string; path: string }> = [];
+    const adapter = new TasksApiAdapter(() => ({
+      createTaskLineModal: async () => "",
+      editTaskLineModal: async () => "",
+      executeToggleTaskDoneCommand: (line, path) => {
+        toggled.push({ line, path });
+        return line.replace("- [ ]", "- [x]").replace(" ^repeat-1", " ✅ 2026-08-10 ^repeat-1");
+      }
+    }));
+    const tasks = new ProjectTaskService(vault, new WriteTransactionExecutor(vault), adapter);
+    const current = parseSingleTask(await vault.read("projects/a.md"), "projects/a.md", "project");
+    const receipt = await tasks.update(current, { completed: true }, new Date(2026, 7, 10));
+    expect(receipt.status).toBe("committed");
+    expect(toggled).toEqual([{ line: current.raw, path: "projects/a.md" }]);
+    expect(await vault.read("projects/a.md")).toContain("- [x] 重复检查 🔁 every week 📅 2026-08-20 ✅ 2026-08-10 ^repeat-1");
+  });
+
+  it("creates and edits advanced Tasks lines without bypassing stable block IDs", async () => {
+    const vault = new MemoryVault();
+    vault.seed("projects/a.md", "---\ntype: 项目\n---\n\n## 待办\n");
+    const adapter = new TasksApiAdapter(() => ({
+      createTaskLineModal: async () => "- [ ] 高级任务 🔁 every month 📅 2026-09-01",
+      editTaskLineModal: async (line) => line.replace("高级任务", "高级任务（已编辑）"),
+      executeToggleTaskDoneCommand: (line) => line
+    }));
+    const tasks = new ProjectTaskService(vault, new WriteTransactionExecutor(vault), adapter);
+    const created = await tasks.addTaskWithTasks("projects/a.md");
+    expect(created.status).toBe("committed");
+    const afterCreate = await vault.read("projects/a.md");
+    expect(afterCreate).toContain("高级任务 🔁 every month 📅 2026-09-01 ^qwb-");
+    const current = parseSingleTask(afterCreate, "projects/a.md", "project");
+    const edited = await tasks.editTaskWithTasks(current);
+    expect(edited.status).toBe("committed");
+    const afterEdit = await vault.read("projects/a.md");
+    expect(afterEdit).toContain("高级任务（已编辑）");
+    expect(afterEdit).toContain(`^${current.blockId}`);
+  });
+
   it("migrates a meeting action once and records a stable source receipt", async () => {
     const vault = new MemoryVault();
     vault.seed("meetings/m.md", "---\ntype: 会议纪要\n---\n## 后续动作\n- [ ] 确认接口 📅 2026-08-20 ^meeting-1");
@@ -411,7 +453,7 @@ describe("project tasks and meeting migration", () => {
   });
 });
 
-function parseSingleTask(content: string, path: string, scope: TaskRecord["scope"]): TaskRecord {
+function parseSingleTask(content: string, path: string, scope: TaskRecord["scope"]): ParsedTask {
   const task = parseMarkdown(content, { path, sourceName: path, scope }).tasks[0];
   if (!task) throw new Error("Expected a task fixture.");
   return task;

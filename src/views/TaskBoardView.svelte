@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
-  import { Platform } from "obsidian";
+  import { Platform, setIcon } from "obsidian";
   import type { TaskRecord, TaskScope } from "../core/types";
   import {
     effectiveTaskDate,
@@ -58,6 +58,11 @@
   let draggedTask: TaskRecord | undefined;
   let dragOverColumn: TimelineColumnId | undefined;
   const isDesktop = !Platform.isMobile;
+
+  function obsidianIcon(node: HTMLElement, name: string) {
+    setIcon(node, name);
+    return { update(next: string) { setIcon(node, next); } };
+  }
 
   $: filteredTasks = snapshot.tasks
     .filter((task) => !task.migrated)
@@ -189,6 +194,25 @@
     message = "";
   }
 
+  async function beginPreferredEdit(task: TaskRecord): Promise<void> {
+    if (!controller.tasksIntegrationAvailable()) {
+      beginEdit(task);
+      return;
+    }
+    const key = taskKey(task);
+    busyKey = key;
+    message = "";
+    try {
+      const result = await controller.editTaskWithTasks(task);
+      if (result === "committed") message = "任务已通过 Tasks 更新";
+      else if (result === "unavailable") beginEdit(task);
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    } finally {
+      busyKey = "";
+    }
+  }
+
   function beginMigration(task: TaskRecord): void {
     migratingKey = taskKey(task);
     editingKey = "";
@@ -312,15 +336,21 @@
 <div class="qwb-task-board">
   <header class="qwb-task-board-header">
     <div>
-      <span class="qwb-task-board-eyebrow">ASTERISM · TASK BOARD · 0.6.2</span>
+      <span class="qwb-task-board-eyebrow">ASTERISM · TASK BOARD · 0.8.9</span>
       <h1>任务看板</h1>
       <p>统一查看项目任务、客户行动和待迁移会议草稿。</p>
     </div>
-    <div class="qwb-task-board-actions">
+    <div class="qwb-task-board-actions qwb-page-nav" role="toolbar" aria-label="Asterism 页面导航与任务看板操作">
       <span class:enabled={controller.settings.writesEnabled} class="qwb-task-board-write-state">
         <i></i>{controller.settings.writesEnabled ? "可编辑" : "只读诊断"}
       </span>
-      <button on:click={refresh}>刷新</button>
+      <span class="qwb-page-nav-divider" aria-hidden="true"></span>
+      <button class="qwb-task-board-icon-button" use:obsidianIcon={"asterism-mark"} aria-label="打开工作台" title="工作台" on:click={() => controller.openWorkbench()}></button>
+      <button class="qwb-task-board-icon-button is-current" use:obsidianIcon={"list-todo"} aria-label="当前页面：任务看板" title="任务看板" aria-current="page" on:click={() => controller.openTaskBoard()}></button>
+      <button class="qwb-task-board-icon-button" use:obsidianIcon={"clipboard-check"} aria-label="打开项目审阅" title="项目审阅" on:click={() => controller.openProjectReview()}></button>
+      <button class="qwb-task-board-icon-button" use:obsidianIcon={"panel-right-open"} aria-label="打开上下文侧栏" title="上下文侧栏" on:click={() => controller.openContextPanel()}></button>
+      <span class="qwb-page-nav-divider" aria-hidden="true"></span>
+      <button class="qwb-task-board-icon-button" use:obsidianIcon={"refresh-cw"} aria-label="刷新任务看板" title="刷新" on:click={refresh}></button>
     </div>
   </header>
 
@@ -362,7 +392,7 @@
                 <span class="qwb-task-board-scope {task.scope}">{sourceLabel(task)}</span>
                 <span class="qwb-task-board-card-controls">
                   <span class="qwb-task-board-priority {task.priority ?? 'normal'}">{priorityLabel(task.priority)}</span>
-                  {#if mode === "timeline"}<button class="qwb-task-board-drag-handle" draggable={canDrag(task)} disabled={!canDrag(task)} aria-label={`拖动任务：${task.text}`} title={dragHint(task)} on:dragstart={(event) => startDrag(event, task)} on:dragend={finishDrag}>⠿</button>{/if}
+                  {#if mode === "timeline"}<button class="qwb-task-board-drag-handle" use:obsidianIcon={"grip-vertical"} draggable={canDrag(task)} disabled={!canDrag(task)} aria-label={`拖动任务：${task.text}`} title={dragHint(task)} on:dragstart={(event) => startDrag(event, task)} on:dragend={finishDrag}></button>{/if}
                 </span>
               </div>
 
@@ -389,7 +419,7 @@
                 <footer>
                   <button on:click={() => controller.openPath(task.path)}>打开来源</button>
                   {#if task.scope === "meeting-draft" && !task.completed}<button disabled={!controller.settings.writesEnabled || Boolean(busyKey)} on:click={() => beginMigration(task)}>迁移</button>{/if}
-                  <button disabled={!controller.settings.writesEnabled || Boolean(busyKey)} on:click={() => beginEdit(task)}>编辑 / 改期</button>
+                  <button disabled={!controller.settings.writesEnabled || Boolean(busyKey)} on:click={() => beginPreferredEdit(task)}>编辑 / 改期</button>
                   <button class="complete" disabled={!controller.settings.writesEnabled || Boolean(busyKey)} on:click={() => run(task, () => controller.updateTask(task, { completed: !task.completed }), task.completed ? "任务已恢复" : "任务已完成")}>{task.completed ? "恢复" : "完成"}</button>
                 </footer>
               {/if}

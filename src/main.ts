@@ -10,7 +10,7 @@ import {
 import type { ActivityDay, ContextSurface, EntityKind, EntityRecord, LayoutItem, LayoutSchema, TaskRecord, TransactionReceipt } from "./core/types";
 import { DiagnosticService, type DiagnosticVaultReader } from "./core/diagnostic";
 import { createBuiltinWidgetRegistry } from "./core/widget-registry";
-import { ensureActivityHeatmap, ensureContextSidebarLayouts, ensureSingleWorkbenchLayout, getDefaultLayouts, upgradePersistedLayouts, validateLayout } from "./core/layout";
+import { ensureActivityHeatmap, ensureContextSidebarLayouts, ensureScheduleOverview, ensureSingleWorkbenchLayout, ensureUnscheduledTaskList, getDefaultLayouts, upgradePersistedLayouts, validateLayout } from "./core/layout";
 import { DEFAULT_SIDEBAR_PROFILES } from "./core/sidebar-context";
 import {
   migrateLayoutToOrderedGrid,
@@ -23,20 +23,34 @@ import {
   KnowledgePublicationPlanner,
   MeetingMigrationService,
   ObsidianVaultAdapter,
+  ProjectReviewService,
   ProjectTaskService,
+  FullCalendarAdapter,
+  TasksApiAdapter,
   TemplateService,
   TransactionJournal,
   WriteTransactionExecutor,
   contentRevision,
   normalizeVaultPath,
   type DetailedTransactionReceipt,
+  type FullCalendarPluginAccess,
   type KnowledgePublicationInput,
   type KnowledgePublicationPreview,
   type MeetingMigrationBatchResult,
+  type TasksApiV1,
   type VaultPort
 } from "./services";
+import { isTasksApiV1 } from "./services/tasks-api-adapter";
 import { DEFAULT_SETTINGS, type QuietWorkbenchSettings } from "./settings";
 import { appendQuickMemoContent, normalizeQuickMemoEntry, recentQuickMemoEntries } from "./domain/memo";
+import {
+  buildProjectReviewAiPrompt,
+  buildProjectReviewEvidence,
+  serializeProjectReviewEvidence,
+  type ProjectReviewInput
+} from "./domain/project-review";
+import { formatDate } from "./services/template-service";
+import { enhanceProjectTimeline, renderProjectRelatedFiles } from "./services/project-note-enhancer";
 import { QuietWorkbenchSettingTab } from "./settings-tab";
 import type {
   AddProjectTaskInput,
@@ -60,14 +74,21 @@ import {
   TASK_BOARD_VIEW_TYPE,
   TaskBoardItemView
 } from "./views/TaskBoardItemView";
+import {
+  PROJECT_REVIEW_VIEW_TYPE,
+  ProjectReviewItemView
+} from "./views/ProjectReviewItemView";
 
 interface PersistedPluginData extends Partial<QuietWorkbenchSettings> {
   settingsSchemaVersion?: number;
   transactionJournal?: ReturnType<TransactionJournal["serialize"]>;
 }
 
-const CURRENT_SETTINGS_SCHEMA_VERSION = 6;
-const LEGACY_MEMO_PATH = "40_管理_Management/01_工作_Work/Workbench速记.md";
+const CURRENT_SETTINGS_SCHEMA_VERSION = 10;
+const LEGACY_MEMO_PATHS = new Set([
+  "40_管理_Management/01_工作_Work/Workbench速记.md",
+  "40_管理_Management/01_工作_Work/Quiet Workbench 速记.md"
+]);
 const ASTERISM_ICON_ID = "asterism-mark";
 const ASTERISM_ICON_SVG = `
   <g transform="scale(4.1666667)">
@@ -105,6 +126,8 @@ class PluginWorkbenchController implements WorkbenchController {
   private readonly journal: TransactionJournal;
   private readonly transactions: WriteTransactionExecutor;
   private readonly tasks: ProjectTaskService;
+  private readonly fullCalendar: FullCalendarAdapter;
+  private readonly projectReviews: ProjectReviewService;
   private readonly meetingMigrations: MeetingMigrationService;
   private readonly knowledgePublications: KnowledgePublicationPlanner;
   private readonly templates = new TemplateService();
@@ -127,7 +150,21 @@ class PluginWorkbenchController implements WorkbenchController {
     this.transactions = new WriteTransactionExecutor(this.vaultPort, this.journal, {
       isPathProtected: (path) => this.isConfiguredTemplatePath(path)
     });
-    this.tasks = new ProjectTaskService(this.vaultPort, this.transactions);
+    this.tasks = new ProjectTaskService(
+      this.vaultPort,
+      this.transactions,
+      new TasksApiAdapter(() => resolveTasksApi(plugin))
+    );
+    this.fullCalendar = new FullCalendarAdapter({
+      resolvePlugin: () => resolveFullCalendarPlugin(plugin),
+      getToken: () => plugin.settings.fullCalendarAccessToken,
+      saveToken: async (token) => {
+        plugin.settings.fullCalendarAccessToken = token;
+        await plugin.saveSettings();
+      },
+      executeOpenCommand: () => executeFullCalendarOpenCommand(plugin)
+    });
+    this.projectReviews = new ProjectReviewService(this.vaultPort, this.transactions);
     this.meetingMigrations = new MeetingMigrationService(this.vaultPort, this.transactions);
     this.knowledgePublications = new KnowledgePublicationPlanner(this.vaultPort);
     this.diagnostics = new DiagnosticService(new ObsidianDiagnosticReader(this.vaultPort));
@@ -157,11 +194,13 @@ class PluginWorkbenchController implements WorkbenchController {
       this.index = this.createIndex();
       this.indexSignature = nextSignature;
     }
-    const [update, report, memo, activity] = await Promise.all([
+    const calendarRange = scheduleReadRange();
+    const [update, report, memo, activity, calendar] = await Promise.all([
       this.index.scan(),
       this.diagnostics.run(this.plugin.settings),
       this.readQuickMemo(),
-      this.readActivity()
+      this.readActivity(),
+      this.fullCalendar.snapshot(calendarRange.start, calendarRange.end)
     ]);
     const diagnostics: DiagnosticItem[] = report.items.map((item) => ({
       id: item.id,
@@ -185,6 +224,14 @@ class PluginWorkbenchController implements WorkbenchController {
         status: "warning"
       });
     }
+    if (calendar.state === "error") {
+      diagnostics.push({
+        id: "full-calendar.api",
+        label: "日程同步暂不可用",
+        detail: calendar.error || "Full Calendar 公共 API 返回错误。",
+        status: "warning"
+      });
+    }
     this.current = {
       ...this.current,
       scannedAt: Date.now(),
@@ -196,6 +243,7 @@ class PluginWorkbenchController implements WorkbenchController {
       knowledge: this.summaries("knowledge"),
       tasks: this.index.listTasks(),
       activity,
+      calendar,
       transactionHistory: this.journal.list(),
       memo,
       context: this.buildContext(this.current.context.path, this.current.context.surface)
@@ -207,8 +255,44 @@ class PluginWorkbenchController implements WorkbenchController {
     await this.plugin.activateTaskBoard();
   }
 
+  async openProjectReview(): Promise<void> {
+    await this.plugin.activateProjectReview();
+  }
+
+  async openCalendar(): Promise<void> {
+    await this.fullCalendar.openCalendar();
+  }
+
+  async openGlobalSearch(): Promise<void> {
+    const commands = (this.plugin.app as typeof this.plugin.app & {
+      commands?: { executeCommandById(id: string): boolean };
+    }).commands;
+    const opened = commands?.executeCommandById("omnisearch:show-modal")
+      || commands?.executeCommandById("global-search:open");
+    if (!opened) throw new Error("Omnisearch 与 Obsidian 全局搜索当前都不可用。");
+  }
+
+  async authorizeCalendar(): Promise<void> {
+    await this.fullCalendar.authorize();
+    await this.refresh();
+  }
+
   async openWorkbench(): Promise<void> {
     await this.plugin.activateWorkbench();
+  }
+
+  async openContextPanel(): Promise<void> {
+    await this.plugin.activateContextPanel();
+  }
+
+  async createBlankNote(): Promise<void> {
+    this.requireWrites();
+    const commands = (this.plugin.app as typeof this.plugin.app & {
+      commands?: { executeCommandById(id: string): boolean };
+    }).commands;
+    if (!commands?.executeCommandById("file-explorer:new-file")) {
+      throw new Error("Obsidian 的“新建笔记”命令暂不可用。");
+    }
   }
 
   async setActivePath(path?: string, surface: ContextSurface = "note"): Promise<void> {
@@ -257,6 +341,32 @@ class PluginWorkbenchController implements WorkbenchController {
     });
     await this.afterReceipt(receipt, input.projectPath);
     return receipt;
+  }
+
+  tasksIntegrationAvailable(): boolean {
+    return this.tasks.isTasksIntegrationAvailable();
+  }
+
+  async addProjectTaskWithTasks(projectPath: string): Promise<"committed" | "cancelled" | "unavailable"> {
+    this.requireWrites();
+    const result = await this.tasks.addTaskWithTasks(projectPath);
+    if (result.status !== "committed") return result.status;
+    await this.afterReceipt(result.receipt, projectPath);
+    return "committed";
+  }
+
+  async editTaskWithTasks(task: TaskRecord): Promise<"committed" | "cancelled" | "unavailable"> {
+    this.requireWrites();
+    const result = await this.tasks.editTaskWithTasks(task);
+    if (result.status !== "committed") return result.status;
+    await this.afterReceipt(result.receipt, task.path);
+    return "committed";
+  }
+
+  async scheduleTaskInCalendar(task: TaskRecord, date: string): Promise<void> {
+    this.requireWrites();
+    await this.fullCalendar.scheduleTask(task, date);
+    await this.refresh();
   }
 
   async updateTask(task: TaskRecord, patch: { completed?: boolean; due?: string | null; priority?: TaskRecord["priority"] }): Promise<TransactionReceipt> {
@@ -341,6 +451,28 @@ class PluginWorkbenchController implements WorkbenchController {
     });
     await this.afterReceipt(receipt);
     return receipt;
+  }
+
+  async saveProjectReview(input: ProjectReviewInput): Promise<TransactionReceipt> {
+    this.requireWrites();
+    const receipt = await this.projectReviews.save(input);
+    await this.afterReceipt(receipt, input.projectPath);
+    return receipt;
+  }
+
+  async openProjectReviewInYolo(projectPath: string): Promise<void> {
+    const project = this.current.projects.find((entry) => entry.path === projectPath);
+    if (!project) throw new Error("项目不在当前索引中，请先刷新后重试。");
+    const today = formatDate(new Date(), "YYYY-MM-DD");
+    const evidence = buildProjectReviewEvidence(project, this.current.tasks, this.current.meetings, today);
+    const prompt = `${buildProjectReviewAiPrompt(evidence, today)}\n\n${serializeProjectReviewEvidence(evidence, today)}`;
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error("clipboard unavailable");
+      await navigator.clipboard.writeText(prompt);
+    } catch {
+      throw new Error("无法复制审阅说明，请检查 Obsidian 的剪贴板权限后重试。");
+    }
+    await this.openYolo(project.path);
   }
 
   async openYolo(path?: string): Promise<void> {
@@ -614,25 +746,46 @@ export default class QuietWorkbenchPlugin extends Plugin {
 
   async onload(): Promise<void> {
     await this.loadSettings();
+    this.applyAppearanceMode();
     addIcon(ASTERISM_ICON_ID, ASTERISM_ICON_SVG);
     this.controller = new PluginWorkbenchController(this, this.journalData);
 
     this.registerView(WORKBENCH_VIEW_TYPE, (leaf) => new WorkbenchItemView(leaf, this.requireController()));
     this.registerView(TASK_BOARD_VIEW_TYPE, (leaf) => new TaskBoardItemView(leaf, this.requireController()));
+    this.registerView(PROJECT_REVIEW_VIEW_TYPE, (leaf) => new ProjectReviewItemView(leaf, this.requireController()));
     this.registerView(CONTEXT_PANEL_VIEW_TYPE, (leaf) => new ContextPanelView(leaf, this.requireController()));
+    this.registerMarkdownPostProcessor((el, context) => enhanceProjectTimeline(el, context));
+    this.registerMarkdownCodeBlockProcessor("asterism-related-files", (source, el, context) => {
+      renderProjectRelatedFiles(this.app, source, el, context);
+    });
     this.addSettingTab(new QuietWorkbenchSettingTab(this.app, this));
 
     this.addRibbonIcon(ASTERISM_ICON_ID, "打开 Asterism 工作台", () => void this.activateWorkbench());
     this.addRibbonIcon("list-todo", "打开任务看板", () => void this.activateTaskBoard());
+    this.addRibbonIcon("clipboard-check", "打开项目审阅", () => void this.activateProjectReview());
     this.addCommand({ id: "open-workbench", name: "打开工作台", callback: () => void this.activateWorkbench() });
     this.addCommand({ id: "open-task-board", name: "打开任务看板", callback: () => void this.activateTaskBoard() });
+    this.addCommand({ id: "open-project-review", name: "打开项目审阅", callback: () => void this.activateProjectReview() });
+    this.addCommand({
+      id: "open-calendar",
+      name: "打开完整日程",
+      callback: () => void this.requireController().openCalendar().catch((error) => new Notice(errorMessage(error)))
+    });
     this.addCommand({ id: "open-context-panel", name: "打开上下文侧栏", callback: () => void this.activateContextPanel() });
+    this.addCommand({
+      id: "create-blank-note",
+      name: "新建笔记",
+      callback: () => void this.requireController().createBlankNote().catch((error) => new Notice(errorMessage(error)))
+    });
     this.addCommand({ id: "refresh-workbench", name: "刷新索引并运行诊断", callback: () => void this.refreshWorkbench() });
     this.addCommand({
       id: "undo-last-transaction",
       name: "撤销最近一次业务写入",
       callback: () => void this.requireController().undoLastTransaction().catch((error) => new Notice(errorMessage(error)))
     });
+    this.registerObsidianProtocolHandler("asterism", () => void this.activateWorkbench());
+    this.registerObsidianProtocolHandler("asterism-task-board", () => void this.activateTaskBoard());
+    this.registerObsidianProtocolHandler("asterism-project-review", () => void this.activateProjectReview());
 
     this.registerEvent(this.app.workspace.on("active-leaf-change", () => void this.syncActiveFile()));
     this.registerEvent(this.app.vault.on("create", (file) => this.scheduleRefresh(file)));
@@ -645,15 +798,19 @@ export default class QuietWorkbenchPlugin extends Plugin {
     });
 
     this.app.workspace.onLayoutReady(() => {
-      void this.rebindStaleViews().then(() => Promise.all([
-        this.refreshWorkbench(),
-        this.syncActiveFile()
-      ])).catch((error) => console.error("Asterism view rebind failed", error));
+      void this.rebindStaleViews()
+        .then(() => Promise.all([
+          this.refreshWorkbench(),
+          this.syncActiveFile()
+        ]))
+        .then(() => this.settings.openWorkbenchOnStartup ? this.activateWorkbench() : undefined)
+        .catch((error) => console.error("Asterism startup failed", error));
       this.startupRefreshTimer = window.setTimeout(() => void this.refreshWorkbench(), 800);
     });
   }
 
   onunload(): void {
+    document.body.classList.remove("qwb-clear-mode", "qwb-journal-mode");
     if (this.controller) {
       this.controller.dispose();
       void this.controller.persistJournal();
@@ -671,6 +828,13 @@ export default class QuietWorkbenchPlugin extends Plugin {
     const existing = this.app.workspace.getLeavesOfType(TASK_BOARD_VIEW_TYPE)[0];
     const leaf = existing ?? this.app.workspace.getLeaf("tab");
     if (!existing) await leaf.setViewState({ type: TASK_BOARD_VIEW_TYPE, active: true });
+    await this.app.workspace.revealLeaf(leaf);
+  }
+
+  async activateProjectReview(): Promise<void> {
+    const existing = this.app.workspace.getLeavesOfType(PROJECT_REVIEW_VIEW_TYPE)[0];
+    const leaf = existing ?? this.app.workspace.getLeaf("tab");
+    if (!existing) await leaf.setViewState({ type: PROJECT_REVIEW_VIEW_TYPE, active: true });
     await this.app.workspace.revealLeaf(leaf);
   }
 
@@ -693,6 +857,7 @@ export default class QuietWorkbenchPlugin extends Plugin {
 
   async saveSettings(journal = this.journalData): Promise<void> {
     this.journalData = journal;
+    this.applyAppearanceMode();
     await this.saveData({
       ...this.settings,
       settingsSchemaVersion: CURRENT_SETTINGS_SCHEMA_VERSION,
@@ -700,24 +865,30 @@ export default class QuietWorkbenchPlugin extends Plugin {
     });
   }
 
+  private applyAppearanceMode(): void {
+    document.body.classList.remove("qwb-journal-mode");
+    document.body.classList.add("qwb-clear-mode");
+  }
+
   private async loadSettings(): Promise<void> {
     const data = (await this.loadData()) as PersistedPluginData | null;
     this.journalData = data?.transactionJournal;
-    const positionedLayouts = ensureActivityHeatmap(ensureContextSidebarLayouts(ensureSingleWorkbenchLayout(
+    const positionedLayouts = ensureUnscheduledTaskList(ensureScheduleOverview(ensureActivityHeatmap(ensureContextSidebarLayouts(ensureSingleWorkbenchLayout(
       upgradePersistedLayouts(data?.layouts?.length ? data.layouts : getDefaultLayouts()),
       data?.activeWorkbenchLayout
-    )));
+    )))));
     const needsOrderedGridMigration = data?.orderedGridVersion !== ORDERED_GRID_VERSION;
     const layouts = migrateLayoutsToOrderedGrid(positionedLayouts, needsOrderedGridMigration);
     const legacyPositionedLayouts = needsOrderedGridMigration && data?.layouts?.length
       ? structuredClone(positionedLayouts)
       : structuredClone(data?.legacyPositionedLayouts ?? []);
-    const memoPath = !data?.memoPath || data.memoPath === LEGACY_MEMO_PATH
+    const memoPath = !data?.memoPath || LEGACY_MEMO_PATHS.has(data.memoPath)
       ? DEFAULT_SETTINGS.memoPath
       : data.memoPath;
     this.settings = {
       ...structuredClone(DEFAULT_SETTINGS),
       ...data,
+      appearanceMode: "clear",
       templates: normalizeTemplatePaths({ ...DEFAULT_SETTINGS.templates, ...data?.templates }),
       clientAliases: { ...DEFAULT_SETTINGS.clientAliases, ...data?.clientAliases },
       enabledPacks: { ...DEFAULT_SETTINGS.enabledPacks, ...data?.enabledPacks },
@@ -758,6 +929,11 @@ export default class QuietWorkbenchPlugin extends Plugin {
       await this.requireController().setActivePath(undefined, this.lastPrimaryContext.surface);
       return;
     }
+    if (viewType === PROJECT_REVIEW_VIEW_TYPE) {
+      this.lastPrimaryContext = { surface: "workbench" };
+      await this.requireController().setActivePath(undefined, this.lastPrimaryContext.surface);
+      return;
+    }
     this.lastPrimaryContext = { path: this.app.workspace.getActiveFile()?.path, surface: "note" };
     await this.requireController().setActivePath(this.lastPrimaryContext.path, this.lastPrimaryContext.surface);
   }
@@ -778,6 +954,10 @@ export default class QuietWorkbenchPlugin extends Plugin {
       {
         type: TASK_BOARD_VIEW_TYPE,
         current: (view: unknown) => view instanceof TaskBoardItemView && view.usesController(controller)
+      },
+      {
+        type: PROJECT_REVIEW_VIEW_TYPE,
+        current: (view: unknown) => view instanceof ProjectReviewItemView && view.usesController(controller)
       },
       {
         type: CONTEXT_PANEL_VIEW_TYPE,
@@ -812,6 +992,8 @@ function entitySummary(entity: EntityRecord): EntitySummary {
     related: fieldString(entity.fields, ["project", "projects", "client", "customer", "organization"]),
     detail: fieldString(entity.fields, ["next_action", "main_requirement", "topic", "profile_summary"]),
     due: fieldString(entity.fields, ["due", "target_date", "followup_date", "meeting_date"]),
+    startTime: fieldString(entity.fields, ["startTime", "start_time"]),
+    endTime: fieldString(entity.fields, ["endTime", "end_time"]),
     phase: fieldString(entity.fields, ["phase", "project_phase"]),
     projectType: fieldString(entity.fields, ["project_type"]),
     client: fieldString(entity.fields, ["client", "customer", "organization"]),
@@ -820,6 +1002,14 @@ function entitySummary(entity: EntityRecord): EntitySummary {
     businessDomains: fieldString(entity.fields, ["business_domains", "business_type"]),
     relationshipStatus: fieldString(entity.fields, ["relationship_status", "stage", "status"]),
     followupDate: fieldString(entity.fields, ["followup_date", "next_followup"]),
+    owner: fieldString(entity.fields, ["owner", "project_owner"]),
+    businessType: fieldString(entity.fields, ["business_type", "business_domain"]),
+    nextAction: fieldString(entity.fields, ["next_action"]),
+    waitingOn: fieldString(entity.fields, ["waiting_on", "waiting_for", "waiting_review"]),
+    reviewStatus: fieldString(entity.fields, ["review_status"]),
+    reviewDue: fieldString(entity.fields, ["review_due"]),
+    reviewNote: fieldString(entity.fields, ["review_note"]),
+    reviewTrigger: fieldString(entity.fields, ["review_trigger"]),
     updatedAt: entity.mtime
   };
 }
@@ -883,6 +1073,9 @@ function applyEntityContext(content: string, input: CreateEntityInput): string {
     result = setFrontmatterField(result, "meeting_date", input.date);
     result = result.replaceAll("{{date}}", input.date).replaceAll("{{ date }}", input.date);
   }
+  if (input.startTime) result = setFrontmatterField(result, "startTime", input.startTime);
+  if (input.endTime) result = setFrontmatterField(result, "endTime", input.endTime);
+  if (input.startTime || input.endTime) result = setFrontmatterField(result, "allDay", "false", false);
   return result;
 }
 
@@ -891,13 +1084,13 @@ function toWikiLink(path: string): string {
   return `[[${target}]]`;
 }
 
-function setFrontmatterField(content: string, key: string, value: string): string {
+function setFrontmatterField(content: string, key: string, value: string, encode = true): string {
   const normalized = content.replace(/\r\n/gu, "\n");
   if (!normalized.startsWith("---\n")) throw new Error("目标模板或知识笔记缺少 YAML frontmatter。");
   const end = normalized.indexOf("\n---", 4);
   if (end < 0) throw new Error("YAML frontmatter 没有正确结束。");
   const header = normalized.slice(4, end);
-  const encoded = JSON.stringify(value);
+  const encoded = encode ? JSON.stringify(value) : value;
   const pattern = new RegExp(`^${escapeRegExp(key)}\\s*:.*$`, "mu");
   const nextHeader = pattern.test(header) ? header.replace(pattern, `${key}: ${encoded}`) : `${header}\n${key}: ${encoded}`;
   return `---\n${nextHeader}\n---${normalized.slice(end + 4)}`;
@@ -913,6 +1106,37 @@ function sceneName(sceneId: string): string {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+interface PluginRegistryAccess {
+  plugins?: { getPlugin(id: string): unknown };
+  commands?: { executeCommandById(id: string): boolean };
+}
+
+function resolveTasksApi(plugin: QuietWorkbenchPlugin): TasksApiV1 | undefined {
+  const registry = (plugin.app as unknown as PluginRegistryAccess).plugins;
+  const tasksPlugin = registry?.getPlugin("obsidian-tasks-plugin") as { apiV1?: unknown } | undefined;
+  return isTasksApiV1(tasksPlugin?.apiV1) ? tasksPlugin.apiV1 : undefined;
+}
+
+function resolveFullCalendarPlugin(plugin: QuietWorkbenchPlugin): FullCalendarPluginAccess | undefined {
+  const registry = (plugin.app as unknown as PluginRegistryAccess).plugins;
+  return (registry?.getPlugin("full-calendar-remastered") ?? registry?.getPlugin("full-calendar")) as FullCalendarPluginAccess | undefined;
+}
+
+function executeFullCalendarOpenCommand(plugin: QuietWorkbenchPlugin): boolean {
+  const commands = (plugin.app as unknown as PluginRegistryAccess).commands;
+  return Boolean(
+    commands?.executeCommandById("full-calendar-remastered:full-calendar-open")
+    || commands?.executeCommandById("full-calendar:full-calendar-open")
+  );
+}
+
+function scheduleReadRange(): { start: Date; end: Date } {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth() - 6, 1);
+  const end = new Date(now.getFullYear(), now.getMonth() + 13, 0, 23, 59, 59, 999);
+  return { start, end };
 }
 
 function comparableVaultPath(path: string): string {

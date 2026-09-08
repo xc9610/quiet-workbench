@@ -12,7 +12,15 @@
   import { formatDate } from "../services/template-service";
   import type { MeetingMigrationBatchResult } from "../services/meeting-migration-service";
   import type { KnowledgePublicationPreview } from "../services/knowledge-publishing-service";
-  import { layoutItemKey } from "../core/layout";
+  import { getDefaultLayouts, layoutItemKey } from "../core/layout";
+  import {
+    cloneLayoutItems,
+    moveVisibleLayoutItem,
+    patchLayoutItem,
+    recordLayoutHistory,
+    removeLayoutItem
+  } from "../core/layout-draft";
+  import { legacySceneItems, type SceneId } from "../core/workbench-scenes";
   import {
     clampSpan,
     clampRowSpan,
@@ -49,29 +57,30 @@
     effectiveTaskDate,
     isRecurringTask,
     isWaitingTask,
+    taskListRows,
     taskQuadrant,
     taskTimeBucket,
     type TaskQuadrant,
     type TaskTimeBucket
   } from "../domain/widget-data";
   import { selectHeroCopy, type HeroCopy, type HeroCopyContext } from "../core/hero-copy";
+  import { buildHeroContext, buildHeroMetrics, type HeroMetric } from "../domain/hero-metrics";
   import { activityStats, buildActivityCalendar } from "../domain/activity";
   import { buildMonthCalendar, calendarDateLabel, calendarMonthLabel, shiftCalendarMonth, type MonthCalendarCell } from "../domain/calendar";
+  import {
+    buildMeetingEntries,
+    buildScheduleEntries,
+    buildTaskDeadlineEntries,
+    groupScheduleAgenda,
+    type CalendarAgendaGroup,
+    type CalendarEntry
+  } from "../domain/calendar-entries";
+  import LayoutEditorBar from "../ui/LayoutEditorBar.svelte";
 
   export let controller: WorkbenchController;
 
-  type SceneId = string;
-  type DialogKind = "entity" | "task" | "task-edit" | "migrate" | "knowledge" | "yolo-preview" | null;
-  type MoveMode = "move" | "resize";
-  const UI_VERSION = "0.7.3";
-
-  interface SceneDefinition {
-    id: SceneId;
-    name: string;
-    description: string;
-    icon: string;
-    items: LayoutItem[];
-  }
+  type DialogKind = "entity" | "task" | "task-edit" | "schedule" | "migrate" | "knowledge" | "yolo-preview" | null;
+  const UI_VERSION = "0.8.9";
 
   interface EntityDraft {
     kind: Exclude<EntityKind, "knowledge">;
@@ -79,64 +88,14 @@
     relatedClient: string;
     relatedProject: string;
     date: string;
+    startTime: string;
+    endTime: string;
   }
 
   interface CalendarViewState {
     month: string;
     selected: string;
   }
-
-  interface CalendarEntry {
-    id: string;
-    date: string;
-    title: string;
-    subtitle: string;
-    path: string;
-    kind: "task" | "meeting";
-    overdue: boolean;
-    completed: boolean;
-  }
-
-  const sceneDefinitions: SceneDefinition[] = [
-    {
-      id: "today",
-      name: "今日执行",
-      description: "集中处理任务、速记与近期项目",
-      icon: "✓",
-      items: [
-        { widgetId: "tasks.today", x: 0, y: 0, width: 8, height: 7 },
-        { widgetId: "capture.memo", x: 8, y: 0, width: 4, height: 3 },
-        { widgetId: "core.quick-create", x: 8, y: 3, width: 4, height: 2 },
-        { widgetId: "projects.recent", x: 8, y: 5, width: 4, height: 3 }
-      ]
-    },
-    {
-      id: "projects",
-      name: "项目管理",
-      description: "查看项目、客户、任务与会议行动项",
-      icon: "◆",
-      items: [
-        { widgetId: "projects.status", x: 0, y: 0, width: 4, height: 4 },
-        { widgetId: "projects.milestones", x: 4, y: 0, width: 4, height: 4 },
-        { widgetId: "tasks.project", x: 8, y: 0, width: 4, height: 4 },
-        { widgetId: "clients.list", x: 0, y: 4, width: 6, height: 4 },
-        { widgetId: "suppliers.list", x: 6, y: 4, width: 6, height: 4 },
-        { widgetId: "meetings.actions", x: 0, y: 8, width: 12, height: 4 }
-      ]
-    },
-    {
-      id: "knowledge",
-      name: "知识整理",
-      description: "处理知识收件箱并建立项目关联",
-      icon: "◇",
-      items: [
-        { widgetId: "knowledge.inbox", x: 0, y: 0, width: 4, height: 4 },
-        { widgetId: "knowledge.triage", x: 4, y: 0, width: 4, height: 4 },
-        { widgetId: "knowledge.project-links", x: 8, y: 0, width: 4, height: 4 },
-        { widgetId: "knowledge.recent", x: 0, y: 4, width: 12, height: 4 }
-      ]
-    }
-  ];
 
   let snapshot: WorkbenchSnapshot = controller.getSnapshot() ?? EMPTY_SNAPSHOT;
   let activeScene: SceneId = (controller.settings.activeWorkbenchLayout as SceneId) || "workbench";
@@ -149,10 +108,13 @@
   let relatedClient = "";
   let relatedProject = "";
   let entityDate = formatDate(new Date(), "YYYY-MM-DD");
+  let entityStartTime = "";
+  let entityEndTime = "";
   let entityTemplatePreview = "";
   let projectPath = "";
   let taskText = "";
   let taskDue = "";
+  let taskScheduled = "";
   let taskPriority: TaskRecord["priority"] = "normal";
   let selectedTask: TaskRecord | undefined;
   let taskEditReason = "";
@@ -178,6 +140,8 @@
   let memoDraft = "";
   let memoInput: HTMLTextAreaElement;
   let layoutEditMode = false;
+  let layoutDirty = false;
+  let layoutOriginalItems: LayoutItem[] = [];
   let showWidgetLibrary = false;
   let widgetLibrarySearch = "";
   let widgetLibraryPack: "all" | "view" | "control" | "capture" = "all";
@@ -186,6 +150,8 @@
   let editingWidget: LayoutItem | undefined;
   let editingConfig: Record<string, unknown> = {};
   let editingTitle = "";
+  let editingCols = 1;
+  let editingRows = 1;
   let sharedProjectPath = "";
   let sharedClientPath = "";
   let sharedMeetingPath = "";
@@ -197,38 +163,12 @@
   let gridColumnCount = 4;
   let gridResizeObserver: ResizeObserver | undefined;
   let unsubscribe = () => {};
-  let drag:
-    | {
-        kind: "move";
-        pointerId: number;
-        instanceId: string;
-        card: HTMLElement;
-        placeholder: HTMLElement;
-        offsetX: number;
-        offsetY: number;
-        lastX: number;
-        lastY: number;
-        raf: number | null;
-        originalItems: LayoutItem[];
-      }
-    | {
-        kind: "resize";
-        pointerId: number;
-        instanceId: string;
-        card: HTMLElement;
-        startX: number;
-        startY: number;
-        startCols: number;
-        startRows: number;
-        originalItems: LayoutItem[];
-      }
-    | undefined;
-  let heroMetrics: Array<{ label: string; value: number; note: string; tone: "danger" | "accent" | "normal" }> = [];
+  let heroMetrics: HeroMetric[] = [];
   let heroContext: HeroCopyContext = { overdue: 0, dueToday: 0, upcoming: 0, missingNext: 0 };
   let heroCopy: HeroCopy = { title: "今天，继续推进", subtitle: "先看清下一步，再把分散的信息带回项目。" };
   let heroStatus: { label: string; tone: "enabled" | "readonly" | "error" } = { label: "只读诊断", tone: "readonly" };
 
-  $: heroContext = buildHeroContext(snapshot);
+  $: heroContext = buildHeroContext(snapshot, formatDate(new Date(), "YYYY-MM-DD"));
   $: heroMetrics = buildHeroMetrics(heroContext);
   $: heroCopy = selectHeroCopy(controller.settings.hero, formatDate(new Date(), "YYYY-MM-DD"), heroContext);
   $: heroStatus = snapshot.diagnostics.some((item) => item.status === "error")
@@ -282,29 +222,6 @@
     return item.title || getWidgetPreset(item.presetId)?.title || widgetTitles[item.widgetId] || item.widgetId;
   }
 
-  function buildHeroContext(current: WorkbenchSnapshot): HeroCopyContext {
-    const today = formatDate(new Date(), "YYYY-MM-DD");
-    const weekEnd = dateAfter(today, 7);
-    const tasks = current.tasks.filter((task) => !task.completed && !task.migrated);
-    const overdue = tasks.filter((task) => effectiveTaskDate(task) && effectiveTaskDate(task)! < today).length;
-    const dueToday = tasks.filter((task) => effectiveTaskDate(task) === today).length;
-    const upcoming = tasks.filter((task) => {
-      const date = effectiveTaskDate(task);
-      return Boolean(date && date > today && date <= weekEnd);
-    }).length;
-    const missingNext = current.projects.filter((project) => !project.detail?.trim()).length;
-    return { overdue, dueToday, upcoming, missingNext };
-  }
-
-  function buildHeroMetrics(context: HeroCopyContext): Array<{ label: string; value: number; note: string; tone: "danger" | "accent" | "normal" }> {
-    return [
-      { label: "逾期任务", value: context.overdue, note: "overdue", tone: "danger" },
-      { label: "今天到期", value: context.dueToday, note: "due today", tone: "accent" },
-      { label: "未来 7 天", value: context.upcoming, note: "upcoming", tone: "normal" },
-      { label: "缺少下一步", value: context.missingNext, note: "next action", tone: context.missingNext ? "danger" : "normal" }
-    ];
-  }
-
   function heroDate(): string {
     return new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", weekday: "long" }).format(new Date());
   }
@@ -335,7 +252,7 @@
     if (event.key !== "Escape") return;
     if (showClientPicker) showClientPicker = false;
     else if (focusFilterInstances.length) closeFocusFilters();
-    else if (layoutEditMode) layoutEditMode = false;
+    else if (layoutEditMode) cancelLayoutEditing();
   }
 
   async function clearFocusFilters(item: LayoutItem): Promise<void> {
@@ -346,7 +263,7 @@
     const saved = controller.settings.layouts.find(
       (layout) => layout.surface === "workbench" && layout.id === sceneId
     );
-    const source = saved?.items ?? sceneDefinitions.find((scene) => scene.id === sceneId)?.items ?? [];
+    const source = saved?.items ?? legacySceneItems(sceneId);
     return normalizeOrderedItems(source);
   }
 
@@ -625,9 +542,9 @@
         ? structuredClone(preset.config) as unknown as Record<string, unknown>
         : defaultWidgetConfig(widgetId)
     };
-    layoutUndo = [...layoutUndo.slice(-19), items.map((entry) => ({ ...entry }))];
+    layoutUndo = recordLayoutHistory(layoutUndo, items);
     items = [...items, item];
-    await controller.saveLayout(activeScene, items);
+    await persistLayoutDraft();
     showWidgetLibrary = false;
     selectedWidgetType = "";
   }
@@ -647,22 +564,31 @@
 
   async function removeWidget(item: LayoutItem): Promise<void> {
     const key = itemKey(item);
-    layoutUndo = [...layoutUndo.slice(-19), items.map((entry) => ({ ...entry }))];
-    items = items.filter((entry) => itemKey(entry) !== key);
-    await controller.saveLayout(activeScene, items);
+    layoutUndo = recordLayoutHistory(layoutUndo, items);
+    items = removeLayoutItem(items, key);
+    await persistLayoutDraft();
   }
 
   function openWidgetSettings(item: LayoutItem): void {
     editingWidget = item;
     editingTitle = widgetTitle(item);
     editingConfig = structuredClone(item.config ?? defaultWidgetConfig(item.widgetId) ?? {});
+    editingCols = itemCols(item, gridColumnCount);
+    editingRows = itemRows(item);
   }
 
   async function saveWidgetSettings(): Promise<void> {
     if (!editingWidget) return;
     const key = itemKey(editingWidget);
-    items = items.map((item) => itemKey(item) === key ? { ...item, title: editingTitle.trim() || widgetTitle(item), config: structuredClone(editingConfig) } : item);
-    await controller.saveLayout(activeScene, items);
+    layoutUndo = recordLayoutHistory(layoutUndo, items);
+    items = items.map((item) => itemKey(item) === key ? {
+      ...item,
+      title: editingTitle.trim() || widgetTitle(item),
+      cols: clampSpan(editingCols),
+      rows: clampRowSpan(editingRows),
+      config: structuredClone(editingConfig)
+    } : item);
+    await persistLayoutDraft();
     editingWidget = undefined;
   }
 
@@ -857,7 +783,7 @@
       .slice(0, configLimit(item));
   }
 
-  function scopedTasks(item: LayoutItem): TaskRecord[] {
+  function scopedTasks(item: LayoutItem, applyLimit = true): TaskRecord[] {
     const clientMode = queryMode(item) === "client-actions";
     const projectPath = clientMode ? "" : scopedProjectPath(item);
     const clientPath = clientMode ? scopedClientPath(item) : configString(item, "clientPath");
@@ -865,15 +791,15 @@
     const sourceTaskScopes = configSection(item.config ?? {}, "source").taskScopes;
     const taskScopes = Array.isArray(sourceTaskScopes) ? sourceTaskScopes.map(String) : Array.isArray(item.config?.taskScopes) ? item.config.taskScopes.map(String) : [];
     const query = (widgetSearch[itemKey(item)] ?? configString(item, "search")).trim().toLocaleLowerCase("zh-CN");
-    return snapshot.tasks
+    const rows = snapshot.tasks
       .filter((task) => !task.migrated)
       .filter((task) => configBoolean(item, "includeCompleted") || !task.completed)
       .filter((task) => !taskScopes.length || taskScopes.includes(task.scope))
       .filter((task) => !projectPath || projectForTask(task)?.path === projectPath)
       .filter((task) => !clientPath || taskClientPaths(task).includes(clientPath))
       .filter((task) => !projectType || projectForTask(task)?.projectType === projectType)
-      .filter((task) => !query || `${task.text} ${task.sourceName}`.toLocaleLowerCase("zh-CN").includes(query))
-      .slice(0, configLimit(item));
+      .filter((task) => !query || `${task.text} ${task.sourceName}`.toLocaleLowerCase("zh-CN").includes(query));
+    return applyLimit ? rows.slice(0, configLimit(item)) : rows;
   }
 
   function selectedProject(item: LayoutItem) {
@@ -1014,32 +940,20 @@
 
   function calendarEntries(item: LayoutItem): CalendarEntry[] {
     const today = formatDate(new Date(), "YYYY-MM-DD");
-    if (dataSource(item) === "meetings") {
-      return scopedMeetings(item).flatMap((meeting) => meeting.due ? [{
-        id: meeting.path,
-        date: meeting.due.slice(0, 10),
-        title: meeting.name,
-        subtitle: meeting.project || meeting.client || "会议记录",
-        path: meeting.path,
-        kind: "meeting" as const,
-        overdue: false,
-        completed: false
-      }] : []);
-    }
-    return scopedTasks(item).flatMap((task) => {
-      const date = effectiveTaskDate(task);
-      if (!date) return [];
-      return [{
-        id: task.id,
-        date: date.slice(0, 10),
-        title: task.text,
-        subtitle: `${{ project: "项目", client: "客户", "meeting-draft": "会议草稿" }[task.scope]} · ${task.sourceName}`,
-        path: task.path,
-        kind: "task" as const,
-        overdue: !task.completed && date.slice(0, 10) < today,
-        completed: task.completed
-      }];
-    });
+    const source = dataSource(item);
+    const meetings = scopedMeetings(item);
+    if (source === "meetings") return buildMeetingEntries(meetings);
+    const tasks = scopedTasks(item, false);
+    if (source === "mixed") return buildScheduleEntries(tasks, meetings, snapshot.calendar.events);
+    return buildTaskDeadlineEntries(tasks, today);
+  }
+
+  function isScheduleOverview(item: LayoutItem): boolean {
+    return item.presetId === "schedule.overview" || dataSource(item) === "mixed";
+  }
+
+  function scheduleAgendaGroups(item: LayoutItem): CalendarAgendaGroup[] {
+    return groupScheduleAgenda(calendarEntries(item), formatDate(new Date(), "YYYY-MM-DD"), 7);
   }
 
   function calendarEntriesForDate(item: LayoutItem, date: string): CalendarEntry[] {
@@ -1052,19 +966,37 @@
     return entry.kind;
   }
 
+  async function openCalendarEntry(entry: CalendarEntry): Promise<void> {
+    if (entry.path) await controller.openPath(entry.path);
+    else await controller.openCalendar();
+  }
+
+  async function useCalendarIntegration(): Promise<void> {
+    if (snapshot.calendar.state === "authorization-required") {
+      await controller.authorizeCalendar();
+      message = "Full Calendar 已连接";
+      return;
+    }
+    await controller.openCalendar();
+  }
+
+  function calendarIntegrationTitle(): string {
+    if (snapshot.calendar.state === "ready") return "打开 Full Calendar";
+    if (snapshot.calendar.state === "authorization-required") return "连接 Full Calendar";
+    if (snapshot.calendar.state === "unavailable") return "Full Calendar 未启用";
+    return "重新连接 Full Calendar";
+  }
+
   function taskRowsForWidget(item: LayoutItem): TaskRecord[] {
-    const rows = scopedTasks(item);
+    const rows = scopedTasks(item, false);
     const { today, end } = dayRange(7);
-    const mode = queryMode(item);
-    if (item.widgetId === "tasks.inbox" || mode === "inbox") return rows.filter((task) => !effectiveTaskDate(task) || task.scope !== "project");
-    if (item.widgetId === "tasks.waiting" || item.widgetId === "projects.waiting" || mode === "waiting") return rows.filter(isWaitingTask);
-    if (item.widgetId === "tasks.week" || mode === "week") return rows.filter((task) => {
-      const date = effectiveTaskDate(task);
-      return Boolean(date && date >= today && date <= end);
-    });
-    if (item.widgetId === "tasks.recurring" || mode === "recurring") return rows.filter(isRecurringTask);
-    if (mode === "meeting-actions") return rows.filter((task) => task.scope === "meeting-draft");
-    return rows;
+    const configuredMode = queryMode(item);
+    const mode = item.widgetId === "tasks.inbox" ? "inbox"
+      : item.widgetId === "tasks.waiting" || item.widgetId === "projects.waiting" ? "waiting"
+        : item.widgetId === "tasks.week" ? "week"
+          : item.widgetId === "tasks.recurring" ? "recurring"
+            : configuredMode || "all";
+    return taskListRows(rows, mode, today, end, configLimit(item));
   }
 
   function projectRowsForWidget(item: LayoutItem) {
@@ -1140,7 +1072,7 @@
 
   function dialogTitle(kind: DialogKind): string {
     if (!kind) return "工作流";
-    return { entity: "新建条目", task: "添加项目任务", "task-edit": "调整任务", migrate: "迁移会议行动项", knowledge: "处理知识", "yolo-preview": "YOLO 处理预览" }[kind];
+    return { entity: "新建条目", task: "添加项目任务", "task-edit": "调整任务", schedule: "安排到日程", migrate: "迁移会议行动项", knowledge: "处理知识", "yolo-preview": "YOLO 处理预览" }[kind];
   }
 
   function entityTargetFolder(): string {
@@ -1173,197 +1105,47 @@
     return `--cols:${cols};--rows:${rows};grid-column:span ${cols};grid-row:span ${rows}`;
   }
 
-  function beginPointer(event: PointerEvent, item: LayoutItem, mode: MoveMode): void {
-    if (!isDesktop || !layoutEditMode || drag || !gridEl) return;
-    event.preventDefault();
-    event.stopPropagation();
-    const card = (event.currentTarget as HTMLElement).closest(".qwb-widget") as HTMLElement | null;
-    if (!card) return;
-    const originalItems = cloneItems(items);
-    if (mode === "resize") {
-      card.classList.add("qwb-widget--resizing");
-      drag = {
-        kind: "resize",
-        pointerId: event.pointerId,
-        instanceId: itemKey(item),
-        card,
-        startX: event.clientX,
-        startY: event.clientY,
-        startCols: itemCols(item, gridColumnCount),
-        startRows: itemRows(item),
-        originalItems
-      };
-      showResizeBadge(card, itemCols(item, gridColumnCount), itemRows(item));
-      return;
-    }
-
-    // Xove Dashboard ordered-grid drag: a same-span placeholder keeps the
-    // grid slot while the real card is lifted into a fixed layer.
-    const rect = card.getBoundingClientRect();
-    const placeholder = document.createElement("div");
-    placeholder.className = "qwb-layout-placeholder";
-    placeholder.style.setProperty("--cols", String(itemCols(item, gridColumnCount)));
-    placeholder.style.setProperty("--rows", String(item.collapsed ? 1 : itemRows(item)));
-    placeholder.style.gridColumn = `span ${itemCols(item, gridColumnCount)}`;
-    placeholder.style.gridRow = `span ${item.collapsed ? 1 : itemRows(item)}`;
-    card.parentNode?.insertBefore(placeholder, card);
-
-    card.classList.add("qwb-widget--dragging");
-    card.style.width = `${rect.width}px`;
-    card.style.height = `${rect.height}px`;
-    card.style.left = `${rect.left}px`;
-    card.style.top = `${rect.top}px`;
-    card.style.position = "fixed";
-    card.style.zIndex = "9999";
-    card.style.pointerEvents = "none";
-    drag = {
-      kind: "move",
-      pointerId: event.pointerId,
-      instanceId: itemKey(item),
-      card,
-      placeholder,
-      offsetX: event.clientX - rect.left,
-      offsetY: event.clientY - rect.top,
-      lastX: event.clientX,
-      lastY: event.clientY,
-      raf: null,
-      originalItems
-    };
-  }
-
-  function pointerMove(event: PointerEvent): void {
-    if (!drag || event.pointerId !== drag.pointerId || !gridEl) return;
-    if (drag.kind === "resize") {
-      resizeDuringPointer(event, drag);
-      return;
-    }
-    drag.lastX = event.clientX;
-    drag.lastY = event.clientY;
-    drag.card.style.left = `${event.clientX - drag.offsetX}px`;
-    drag.card.style.top = `${event.clientY - drag.offsetY}px`;
-    if (drag.raf !== null) return;
-    const current = drag;
-    drag.raf = window.requestAnimationFrame(() => {
-      current.raf = null;
-      if (drag === current) reflowDuringDrag(current);
-    });
-  }
-
-  async function pointerUp(event: PointerEvent): Promise<void> {
-    if (!drag || event.pointerId !== drag.pointerId) return;
-    const finished = drag;
-    drag = undefined;
-    if (finished.kind === "move") {
-      if (finished.raf !== null) window.cancelAnimationFrame(finished.raf);
-      restoreDraggedCard(finished.card);
-      finished.placeholder.parentNode?.insertBefore(finished.card, finished.placeholder);
-      finished.placeholder.remove();
-      items = orderedItemsFromGrid(items);
-    } else {
-      finished.card.classList.remove("qwb-widget--resizing", "is-limit");
-      finished.card.querySelector(".qwb-resize-ratio")?.remove();
-    }
-    layoutUndo = [...layoutUndo.slice(-19), finished.originalItems];
+  async function persistLayoutDraft(): Promise<void> {
     items = normalizeOrderedItems(items);
+    if (layoutEditMode) {
+      layoutDirty = true;
+      return;
+    }
     await controller.saveLayout(activeScene, items);
   }
 
-  function resizeDuringPointer(
-    event: PointerEvent,
-    state: Extract<NonNullable<typeof drag>, { kind: "resize" }>
-  ): void {
-    const { columnUnit, rowUnit, gap } = gridUnit();
-    const wantedCols = state.startCols + Math.round((event.clientX - state.startX) / Math.max(1, columnUnit + gap));
-    const wantedRows = state.startRows + Math.round((event.clientY - state.startY) / Math.max(1, rowUnit + gap));
-    const cols = clampSpan(wantedCols, gridColumnCount);
-    const rows = clampRowSpan(wantedRows);
-    state.card.style.setProperty("--cols", String(cols));
-    state.card.style.setProperty("--rows", String(rows));
-    state.card.style.gridColumn = `span ${cols}`;
-    state.card.style.gridRow = `span ${rows}`;
-    state.card.classList.toggle("is-limit", wantedCols !== cols || wantedRows !== rows);
-    showResizeBadge(state.card, cols, rows);
-    items = items.map((item) => itemKey(item) === state.instanceId ? { ...item, cols, rows } : item);
+  function beginLayoutEditing(): void {
+    layoutOriginalItems = cloneLayoutItems(items);
+    layoutUndo = [];
+    layoutDirty = false;
+    layoutEditMode = true;
   }
 
-  function reflowDuringDrag(state: Extract<NonNullable<typeof drag>, { kind: "move" }>): void {
-    const cards = Array.from(gridEl.children).filter((node): node is HTMLElement =>
-      node instanceof HTMLElement && node.classList.contains("qwb-widget") && !node.classList.contains("qwb-widget--dragging")
-    );
-    let reference: HTMLElement | null = null;
-    for (const card of cards) {
-      const rect = card.getBoundingClientRect();
-      if (state.lastY < rect.top) { reference = card; break; }
-      if (state.lastY > rect.bottom) continue;
-      if (state.lastX < rect.left + rect.width / 2) { reference = card; break; }
-    }
-    if (state.placeholder.nextElementSibling === reference) return;
-    if (!reference && state.placeholder === gridEl.lastElementChild) return;
-    const before = captureCardRects();
-    gridEl.insertBefore(state.placeholder, reference);
-    playFlip(before);
+  async function saveLayoutEditing(): Promise<void> {
+    if (layoutDirty) await controller.saveLayout(activeScene, items);
+    layoutOriginalItems = [];
+    layoutUndo = [];
+    layoutDirty = false;
+    layoutEditMode = false;
   }
 
-  function captureCardRects(): Map<HTMLElement, DOMRect> {
-    const rects = new Map<HTMLElement, DOMRect>();
-    Array.from(gridEl.children).forEach((node) => {
-      if (node instanceof HTMLElement && node.classList.contains("qwb-widget") && !node.classList.contains("qwb-widget--dragging")) {
-        rects.set(node, node.getBoundingClientRect());
-      }
-    });
-    return rects;
+  function cancelLayoutEditing(): void {
+    if (layoutOriginalItems.length) items = cloneLayoutItems(layoutOriginalItems);
+    layoutOriginalItems = [];
+    layoutUndo = [];
+    layoutDirty = false;
+    layoutEditMode = false;
+    editingWidget = undefined;
+    showWidgetLibrary = false;
   }
 
-  function playFlip(before: Map<HTMLElement, DOMRect>): void {
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    before.forEach((previous, card) => {
-      if (!card.isConnected) return;
-      const next = card.getBoundingClientRect();
-      const dx = previous.left - next.left;
-      const dy = previous.top - next.top;
-      if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
-      card.style.transition = "none";
-      card.style.transform = `translate(${dx}px, ${dy}px)`;
-      void card.offsetWidth;
-      card.style.transition = "transform 220ms cubic-bezier(0.2, 0, 0, 1)";
-      card.style.transform = "";
-      window.setTimeout(() => {
-        card.style.removeProperty("transition");
-        card.style.removeProperty("transform");
-      }, 240);
-    });
-  }
-
-  function orderedItemsFromGrid(current: LayoutItem[]): LayoutItem[] {
-    const byKey = new Map(current.map((item) => [itemKey(item), item]));
-    const visible = Array.from(gridEl.children)
-      .filter((node): node is HTMLElement => node instanceof HTMLElement && node.classList.contains("qwb-widget"))
-      .map((node) => node.dataset.instanceId ?? "")
-      .map((key) => byKey.get(key))
-      .filter((item): item is LayoutItem => Boolean(item));
-    const visibleKeys = new Set(visible.map(itemKey));
-    return [...visible, ...current.filter((item) => !visibleKeys.has(itemKey(item)))];
-  }
-
-  function restoreDraggedCard(card: HTMLElement): void {
-    card.classList.remove("qwb-widget--dragging");
-    for (const property of ["position", "left", "top", "width", "height", "z-index", "pointer-events"]) {
-      card.style.removeProperty(property);
-    }
-  }
-
-  function showResizeBadge(card: HTMLElement, cols: number, rows: number): void {
-    let badge = card.querySelector(".qwb-resize-ratio") as HTMLElement | null;
-    if (!badge) badge = card.createDiv({ cls: "qwb-resize-ratio" });
-    badge.setText(`${cols} × ${rows}`);
-  }
-
-  function gridUnit(): { columnUnit: number; rowUnit: number; gap: number } {
-    const style = getComputedStyle(gridEl);
-    const gap = parseFloat(style.columnGap) || 12;
-    const columnUnit = Math.max(40, (gridEl.getBoundingClientRect().width - gap * (gridColumnCount - 1)) / gridColumnCount);
-    const rowUnit = Math.max(96, Math.min(144, Math.round(columnUnit * .4)));
-    return { columnUnit, rowUnit, gap };
+  async function moveItem(instanceId: string, offset: -1 | 1): Promise<void> {
+    const visibleKeys = items.filter((item) => !item.hidden && enabled(item)).map(itemKey);
+    const next = moveVisibleLayoutItem(items, visibleKeys, instanceId, offset);
+    if (next === items) return;
+    layoutUndo = recordLayoutHistory(layoutUndo, items);
+    items = next;
+    await persistLayoutDraft();
   }
 
   function updateGridMetrics(): void {
@@ -1379,25 +1161,10 @@
     gridEl.style.setProperty("--qwb-row-h", `${rowUnit}px`);
   }
 
-  function cloneItems(source: LayoutItem[]): LayoutItem[] {
-    return source.map((item) => ({ ...item, config: item.config ? structuredClone(item.config) : undefined }));
-  }
-
   async function setItemState(instanceId: string, patch: Partial<LayoutItem>): Promise<void> {
-    layoutUndo = [...layoutUndo.slice(-19), items.map((item) => ({ ...item }))];
-    items = items.map((item) => (itemKey(item) === instanceId ? { ...item, ...patch } : item));
-    await controller.saveLayout(activeScene, items);
-  }
-
-  async function moveMobile(instanceId: string, offset: -1 | 1): Promise<void> {
-    const index = items.findIndex((item) => itemKey(item) === instanceId);
-    const target = index + offset;
-    if (index < 0 || target < 0 || target >= items.length) return;
-    layoutUndo = [...layoutUndo.slice(-19), items.map((item) => ({ ...item }))];
-    const next = [...items];
-    [next[index], next[target]] = [next[target], next[index]];
-    items = next;
-    await controller.saveLayout(activeScene, items);
+    layoutUndo = recordLayoutHistory(layoutUndo, items);
+    items = patchLayoutItem(items, instanceId, patch);
+    await persistLayoutDraft();
   }
 
   async function run(action: () => Promise<unknown>, success: string): Promise<boolean> {
@@ -1420,6 +1187,9 @@
     entityName = "";
     relatedClient = contextKind === "client" && (kind === "project" || kind === "meeting") ? contextPath : "";
     relatedProject = contextKind === "project" && kind === "meeting" ? contextPath : "";
+    entityDate = formatDate(new Date(), "YYYY-MM-DD");
+    entityStartTime = "";
+    entityEndTime = "";
     entityTemplatePreview = "";
     entityStack = [];
     dialog = "entity";
@@ -1431,12 +1201,16 @@
       name: entityName,
       relatedClient,
       relatedProject,
-      date: entityDate
+      date: entityDate,
+      startTime: entityStartTime,
+      endTime: entityEndTime
     }];
     entityKind = kind;
     entityName = "";
     relatedClient = "";
     relatedProject = "";
+    entityStartTime = "";
+    entityEndTime = "";
     entityTemplatePreview = "";
   }
 
@@ -1448,6 +1222,8 @@
       relatedClient: relatedClient || undefined,
       relatedProject: relatedProject || undefined,
       date: entityDate || undefined,
+      startTime: entityKind === "meeting" ? entityStartTime || undefined : undefined,
+      endTime: entityKind === "meeting" ? entityEndTime || undefined : undefined,
       openAfterCreate: false
     });
     entityTemplatePreview = `${result.path}\n\n${result.content}`;
@@ -1461,12 +1237,44 @@
     dialog = "task";
   }
 
-  function openTaskEdit(task: TaskRecord): void {
+  function openBasicTaskEdit(task: TaskRecord): void {
     selectedTask = task;
     taskDue = task.due ?? "";
     taskPriority = task.priority ?? "normal";
     taskEditReason = "";
     dialog = "task-edit";
+  }
+
+  async function openTaskEdit(task: TaskRecord): Promise<void> {
+    if (!controller.tasksIntegrationAvailable()) {
+      openBasicTaskEdit(task);
+      return;
+    }
+    busy = true;
+    message = "";
+    try {
+      const result = await controller.editTaskWithTasks(task);
+      if (result === "committed") message = "任务已通过 Tasks 更新";
+      else if (result === "unavailable") openBasicTaskEdit(task);
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    } finally {
+      busy = false;
+    }
+  }
+
+  function openTaskSchedule(task: TaskRecord): void {
+    selectedTask = task;
+    taskScheduled = task.scheduled?.slice(0, 10) || formatDate(new Date(), "YYYY-MM-DD");
+    dialog = "schedule";
+  }
+
+  async function submitTaskSchedule(): Promise<void> {
+    if (!selectedTask || !taskScheduled) return;
+    await run(async () => {
+      await controller.scheduleTaskInCalendar(selectedTask!, taskScheduled);
+      dialog = null;
+    }, "任务计划日期已更新");
   }
 
   function openMigration(task?: TaskRecord): void {
@@ -1490,14 +1298,16 @@
     const previous = layoutUndo.at(-1);
     if (!previous) return;
     layoutUndo = layoutUndo.slice(0, -1);
-    items = previous.map((item) => ({ ...item }));
-    await controller.saveLayout(activeScene, items);
+    items = cloneLayoutItems(previous);
+    await persistLayoutDraft();
   }
 
   async function restoreLayout(): Promise<void> {
-    await controller.restoreLayout(activeScene);
-    items = loadScene(activeScene);
-    layoutUndo = [];
+    const fallback = getDefaultLayouts().find((layout) => layout.id === "workbench" && layout.surface === "workbench");
+    if (!fallback) throw new Error("找不到默认工作台布局。");
+    layoutUndo = recordLayoutHistory(layoutUndo, items);
+    items = normalizeOrderedItems(cloneLayoutItems(fallback.items));
+    await persistLayoutDraft();
   }
 
   async function exportLayout(): Promise<void> {
@@ -1512,6 +1322,8 @@
       relatedClient: relatedClient || undefined,
       relatedProject: relatedProject || undefined,
       date: entityDate || undefined,
+      startTime: entityKind === "meeting" ? entityStartTime || undefined : undefined,
+      endTime: entityKind === "meeting" ? entityEndTime || undefined : undefined,
       openAfterCreate: entityStack.length === 0
     };
     if (!input.name) return;
@@ -1533,6 +1345,8 @@
       relatedClient = childKind === "client" ? createdPath : parent.relatedClient;
       relatedProject = childKind === "project" ? createdPath : parent.relatedProject;
       entityDate = parent.date;
+      entityStartTime = parent.startTime;
+      entityEndTime = parent.endTime;
       entityTemplatePreview = "";
       message = `${childKind === "client" ? "客户" : "项目"}已创建，已返回原表单`;
     } catch (error) {
@@ -1556,6 +1370,25 @@
     );
     if (succeeded) {
       dialog = null;
+    }
+  }
+
+  async function submitTaskWithTasks(): Promise<void> {
+    if (!projectPath) return;
+    busy = true;
+    message = "";
+    try {
+      const result = await controller.addProjectTaskWithTasks(projectPath);
+      if (result === "committed") {
+        message = "项目任务已通过 Tasks 添加";
+        dialog = null;
+      } else if (result === "unavailable") {
+        message = "Tasks 增强当前不可用；仍可使用 Asterism 基础表单。";
+      }
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    } finally {
+      busy = false;
     }
   }
 
@@ -1662,9 +1495,6 @@
 
   onMount(() => {
     hydrateFocusFilters();
-    window.addEventListener("pointermove", pointerMove);
-    window.addEventListener("pointerup", pointerUp);
-    window.addEventListener("pointercancel", pointerUp);
     document.addEventListener("pointerdown", handleDocumentPointerDown);
     document.addEventListener("keydown", handleDocumentKeydown);
     if (isDesktop && gridEl) {
@@ -1674,9 +1504,6 @@
     }
     unsubscribe = controller.subscribe((next) => (snapshot = next));
     return () => {
-      window.removeEventListener("pointermove", pointerMove);
-      window.removeEventListener("pointerup", pointerUp);
-      window.removeEventListener("pointercancel", pointerUp);
       document.removeEventListener("pointerdown", handleDocumentPointerDown);
       document.removeEventListener("keydown", handleDocumentKeydown);
       gridResizeObserver?.disconnect();
@@ -1698,12 +1525,24 @@
           <p>{heroCopy.subtitle}</p>
         </div>
       {/key}
-      <div class="qwb-header-actions" role="toolbar" aria-label="工作台操作">
+      <div class="qwb-header-actions qwb-page-nav" role="toolbar" aria-label="Asterism 页面导航与操作">
+        <button use:obsidianIcon={"asterism-mark"} class="qwb-hero-action is-current" aria-label="当前页面：工作台" title="工作台" aria-current="page" on:click={() => controller.openWorkbench()}></button>
         <button use:obsidianIcon={"list-todo"} class="qwb-hero-action" aria-label="打开任务看板" title="任务看板" on:click={() => controller.openTaskBoard()}></button>
+        <button use:obsidianIcon={"clipboard-check"} class="qwb-hero-action" aria-label="打开项目审阅" title="项目审阅" on:click={() => controller.openProjectReview()}></button>
+        <button use:obsidianIcon={"calendar-days"} class="qwb-hero-action" aria-label="打开完整日程" title="完整日程" on:click={() => run(() => controller.openCalendar())}></button>
+        <button use:obsidianIcon={"panel-right-open"} class="qwb-hero-action" aria-label="打开上下文侧栏" title="上下文侧栏" on:click={() => controller.openContextPanel()}></button>
+        <span class="qwb-page-nav-divider" aria-hidden="true"></span>
         <button use:obsidianIcon={"refresh-cw"} class="qwb-hero-action" aria-label="刷新工作台" title="刷新" disabled={busy} on:click={() => run(() => controller.refresh(), "已刷新")}></button>
-        <button use:obsidianIcon={layoutEditMode ? "check" : "layout-dashboard"} class:active={layoutEditMode} class="qwb-hero-action" aria-label={layoutEditMode ? "完成布局编辑" : "编辑布局"} title={layoutEditMode ? "完成编辑" : "编辑布局"} aria-pressed={layoutEditMode} on:click={() => (layoutEditMode = !layoutEditMode)}></button>
+        <button use:obsidianIcon={layoutEditMode ? "check" : "layout-dashboard"} class:active={layoutEditMode} class="qwb-hero-action" aria-label={layoutEditMode ? "保存并完成布局编辑" : "编辑布局"} title={layoutEditMode ? "保存布局" : "编辑布局"} aria-pressed={layoutEditMode} on:click={() => layoutEditMode ? run(saveLayoutEditing, "布局已保存") : beginLayoutEditing()}></button>
         <button use:obsidianIcon={"rotate-ccw"} class="qwb-hero-action" aria-label="撤销最近一次业务写入" title="撤销业务写入" disabled={busy} on:click={() => run(() => controller.undoLastTransaction(), "已撤销最近一次操作")}></button>
       </div>
+    </div>
+    <div class="qwb-hero-search-region" role="search" aria-label="全库搜索">
+      <button class="qwb-hero-search" type="button" aria-label="使用 Omnisearch 搜索笔记、项目、客户与会议" on:click={() => run(() => controller.openGlobalSearch(), "已打开全库搜索")}>
+        <i use:obsidianIcon={"search"} aria-hidden="true"></i>
+        <span>搜索笔记、项目、客户与会议……</span>
+        <kbd>Omnisearch</kbd>
+      </button>
     </div>
     <div class="qwb-hero-metrics">
       {#each heroMetrics as metric}
@@ -1713,13 +1552,17 @@
   </header>
 
   {#if layoutEditMode}
-    <div class="qwb-layout-actions" aria-label="布局操作">
-      <span>布局编辑中</span>
-      <button class="qwb-add-widget" disabled={busy} on:click={() => { selectedWidgetType = ""; showWidgetLibrary = true; }}>＋ 添加组件</button>
-      <button disabled={!layoutUndo.length || busy} on:click={() => run(undoLayout, "已撤销布局调整")}>撤销布局</button>
-      <button disabled={busy} on:click={() => run(restoreLayout, "已恢复默认布局")}>恢复默认</button>
-      <button disabled={busy} on:click={() => run(exportLayout, "布局已导出")}>导出</button>
-    </div>
+    <LayoutEditorBar
+      dirty={layoutDirty}
+      canUndo={layoutUndo.length > 0}
+      {busy}
+      onAdd={() => { selectedWidgetType = ""; showWidgetLibrary = true; }}
+      onUndo={() => run(undoLayout, "已撤销布局调整")}
+      onRestore={() => run(restoreLayout, "已载入默认布局；保存后生效")}
+      onExport={() => run(exportLayout, "布局已导出")}
+      onCancel={cancelLayoutEditing}
+      onSave={() => run(saveLayoutEditing, "布局已保存")}
+    />
   {/if}
 
   {#if !controller.settings.writesEnabled}
@@ -1735,24 +1578,20 @@
 
   {#key activeScene}
     <div class="qwb-grid" bind:this={gridEl}>
-    {#each items.filter((item) => !item.hidden && enabled(item)) as item (itemKey(item))}
+    {#each items.filter((item) => !item.hidden && enabled(item)) as item, itemIndex (itemKey(item))}
       <section data-instance-id={itemKey(item)} class:collapsed={item.collapsed} class:editing={layoutEditMode} class="qwb-widget" style={itemStyle(item)}>
         <header class="qwb-widget-header">
           {#if layoutEditMode}
-            <button class="qwb-drag-handle" aria-label={`移动${widgetTitle(item)}`} on:pointerdown={(event) => beginPointer(event, item, "move")}>
-              <span aria-hidden="true">⠿</span>
-            </button>
+            <span class="qwb-layout-order" aria-label={`布局顺序 ${itemIndex + 1}`}>{itemIndex + 1}</span>
           {/if}
           <h2>{widgetTitle(item)}</h2>
           {#if layoutEditMode}
             <div class="qwb-widget-controls">
-              {#if !isDesktop}
-                <button aria-label="上移" on:click={() => moveMobile(itemKey(item), -1)}>↑</button>
-                <button aria-label="下移" on:click={() => moveMobile(itemKey(item), 1)}>↓</button>
-              {/if}
-              <button aria-label="组件设置" title="组件设置" on:click={() => openWidgetSettings(item)}>⚙</button>
-              <button aria-label={item.collapsed ? "展开" : "折叠"} on:click={() => setItemState(itemKey(item), { collapsed: !item.collapsed })}>{item.collapsed ? "＋" : "−"}</button>
-              <button aria-label="隐藏" on:click={() => setItemState(itemKey(item), { hidden: true })}>×</button>
+              <button use:obsidianIcon={"arrow-left"} aria-label={`将${widgetTitle(item)}前移`} title="前移" disabled={itemIndex === 0} on:click={() => moveItem(itemKey(item), -1)}></button>
+              <button use:obsidianIcon={"arrow-right"} aria-label={`将${widgetTitle(item)}后移`} title="后移" disabled={itemIndex === items.filter((candidate) => !candidate.hidden && enabled(candidate)).length - 1} on:click={() => moveItem(itemKey(item), 1)}></button>
+              <button use:obsidianIcon={"settings-2"} aria-label="组件设置" title="组件设置" on:click={() => openWidgetSettings(item)}></button>
+              <button use:obsidianIcon={item.collapsed ? "chevron-down" : "chevron-up"} aria-label={item.collapsed ? "展开" : "折叠"} title={item.collapsed ? "展开" : "折叠"} on:click={() => setItemState(itemKey(item), { collapsed: !item.collapsed })}></button>
+              <button use:obsidianIcon={"eye-off"} aria-label="隐藏" title="隐藏组件" on:click={() => setItemState(itemKey(item), { hidden: true })}></button>
             </div>
           {/if}
         </header>
@@ -1761,6 +1600,7 @@
           <div class="qwb-widget-body">
             {#if item.widgetId === "core.quick-create"}
               <div class="qwb-create-grid">
+                <button disabled={!controller.settings.writesEnabled} on:click={() => run(() => controller.createBlankNote(), "已打开新笔记")}><span>＋</span>笔记</button>
                 <button on:click={() => openCreate("project")}><span>＋</span>项目</button>
                 <button on:click={() => openCreate("client")}><span>＋</span>客户</button>
                 <button on:click={() => openCreate("meeting")}><span>＋</span>会议</button>
@@ -1801,7 +1641,7 @@
                         {#if task.priority && task.priority !== "normal"}<span class:high={task.priority === "highest" || task.priority === "high"} class="qwb-focus-priority">{priorityLabel(task.priority)}优先</span>{/if}
                       </div>
                     </div>
-                    {#if task.scope === "meeting-draft"}<button class="qwb-row-action" disabled={!controller.settings.writesEnabled} on:click={() => openMigration(task)}>迁移</button>{:else}<button class="qwb-row-action" on:click={() => openTaskEdit(task)}>编辑</button>{/if}
+                    {#if task.scope === "meeting-draft"}<button class="qwb-row-action" disabled={!controller.settings.writesEnabled} on:click={() => openMigration(task)}>迁移</button>{:else}<div class="qwb-row-actions"><button class="qwb-row-action" disabled={!controller.settings.writesEnabled} on:click={() => openTaskSchedule(task)}>安排</button><button class="qwb-row-action" on:click={() => openTaskEdit(task)}>编辑</button></div>{/if}
                   </div>
                 {:else}
                   <div class="qwb-focus-empty"><p class="qwb-empty">当前筛选下没有任务。</p><button type="button" on:click={() => run(() => clearFocusFilters(item), "筛选已重置")}>清除筛选</button></div>
@@ -1829,7 +1669,7 @@
               <div class="qwb-widget-search"><input value={widgetSearch[itemKey(item)] ?? ""} placeholder="搜索任务" on:input={(event) => (widgetSearch = { ...widgetSearch, [itemKey(item)]: (event.currentTarget as HTMLInputElement).value })} /><span>{scopedTasks(item).length}</span></div>
               <div class="qwb-task-list">
                 {#each taskRowsForWidget(item) as task (task.id)}
-                  <div class="qwb-task-row"><input type="checkbox" checked={task.completed} disabled={!controller.settings.writesEnabled || busy || task.scope === "meeting-draft"} on:change={(event) => run(() => controller.updateTask(task, { completed: (event.currentTarget as HTMLInputElement).checked }), "任务状态已更新")} /><button class="qwb-link" title={task.text} on:click={() => controller.openPath(task.path)}><span class="qwb-task-title-text">{task.text}</span></button><div class="qwb-task-meta"><span class="qwb-task-source" title={`${scopeLabel(task.scope)} · ${task.sourceName}`}><b>{scopeLabel(task.scope)}</b><em>{task.sourceName}</em></span><time>{effectiveTaskDate(task) ?? "未安排"}</time>{#if task.priority && task.priority !== "normal"}<span class:high={task.priority === "highest" || task.priority === "high"} class="qwb-task-priority">{priorityLabel(task.priority)}</span>{/if}</div>{#if task.scope === "meeting-draft"}<button class="qwb-row-action" disabled={!controller.settings.writesEnabled} on:click={() => openMigration(task)}>迁移</button>{:else}<button class="qwb-row-action" on:click={() => openTaskEdit(task)}>编辑</button>{/if}</div>
+                  <div class="qwb-task-row"><input type="checkbox" checked={task.completed} disabled={!controller.settings.writesEnabled || busy || task.scope === "meeting-draft"} on:change={(event) => run(() => controller.updateTask(task, { completed: (event.currentTarget as HTMLInputElement).checked }), "任务状态已更新")} /><button class="qwb-link" title={task.text} on:click={() => controller.openPath(task.path)}><span class="qwb-task-title-text">{task.text}</span></button><div class="qwb-task-meta"><span class="qwb-task-source" title={`${scopeLabel(task.scope)} · ${task.sourceName}`}><b>{scopeLabel(task.scope)}</b><em>{task.sourceName}</em></span><time>{effectiveTaskDate(task) ?? "未安排"}</time>{#if task.priority && task.priority !== "normal"}<span class:high={task.priority === "highest" || task.priority === "high"} class="qwb-task-priority">{priorityLabel(task.priority)}</span>{/if}</div>{#if task.scope === "meeting-draft"}<button class="qwb-row-action" disabled={!controller.settings.writesEnabled} on:click={() => openMigration(task)}>迁移</button>{:else}<div class="qwb-row-actions"><button class="qwb-row-action" disabled={!controller.settings.writesEnabled} on:click={() => openTaskSchedule(task)}>安排</button><button class="qwb-row-action" on:click={() => openTaskEdit(task)}>编辑</button></div>{/if}</div>
                 {:else}<p class="qwb-empty">当前组件范围内没有任务。</p>{/each}
               </div>
               {#if queryMode(item) !== "client-actions"}<button class="qwb-text-action" on:click={() => openTask(scopedProjectPath(item))}>＋ 添加项目任务</button>{/if}
@@ -1853,34 +1693,62 @@
                 {/each}
               </div>
             {:else if item.widgetId === "tasks.calendar" || item.widgetId === "view.calendar"}
-              <div class="qwb-month-calendar">
-                <header class="qwb-month-calendar-toolbar">
-                  <button use:obsidianIcon={"chevron-left"} aria-label="上个月" title="上个月" on:click={() => moveCalendarMonth(item, -1)}></button>
-                  <strong>{calendarMonthLabel(calendarState(item, calendarViewStates[itemKey(item)]).month)}</strong>
-                  <button class="qwb-calendar-today" on:click={() => resetCalendarToday(item)}>今天</button>
-                  <button use:obsidianIcon={"chevron-right"} aria-label="下个月" title="下个月" on:click={() => moveCalendarMonth(item, 1)}></button>
-                </header>
-                <div class="qwb-month-calendar-weekdays" aria-hidden="true">{#each ["一", "二", "三", "四", "五", "六", "日"] as weekday}<span>{weekday}</span>{/each}</div>
-                <div class="qwb-month-calendar-grid">
-                  {#each calendarCells(item, calendarViewStates[itemKey(item)]) as cell (cell.date)}
-                    <button class:outside={!cell.inMonth} class:today={cell.isToday} class:selected={calendarState(item, calendarViewStates[itemKey(item)]).selected === cell.date} aria-label={`${cell.date}，${calendarEntriesForDate(item, cell.date).length} 项`} title={`${cell.date} · ${calendarEntriesForDate(item, cell.date).length} 项`} on:click={() => setCalendarDate(item, cell.date)}>
-                      <time>{cell.day}</time>
-                      <span class="qwb-calendar-dots">
-                        {#each calendarEntriesForDate(item, cell.date).slice(0, 3) as entry (entry.id)}<i class={calendarDotClass(entry)}></i>{/each}
-                        {#if calendarEntriesForDate(item, cell.date).length > 3}<small>{calendarEntriesForDate(item, cell.date).length}</small>{/if}
-                      </span>
-                    </button>
-                  {/each}
-                </div>
-                <section class="qwb-calendar-detail">
-                  <header><strong>{calendarDateLabel(calendarState(item, calendarViewStates[itemKey(item)]).selected)}</strong><span>{calendarEntriesForDate(item, calendarState(item, calendarViewStates[itemKey(item)]).selected).length} 项</span></header>
-                  <div>
-                    {#each calendarEntriesForDate(item, calendarState(item, calendarViewStates[itemKey(item)]).selected) as entry (entry.id)}
-                      <button class:overdue={entry.overdue} class:completed={entry.completed} on:click={() => controller.openPath(entry.path)}><i class={calendarDotClass(entry)}></i><span><strong>{entry.title}</strong><small>{entry.subtitle}</small></span><em>{entry.kind === "meeting" ? "会议" : entry.completed ? "已完成" : "待办"}</em></button>
-                    {:else}<p class="qwb-empty">这一天没有{dataSource(item) === "meetings" ? "会议" : "任务"}。</p>{/each}
+              {#if isScheduleOverview(item)}
+                <div class="qwb-schedule-overview">
+                  <header class="qwb-schedule-overview-header">
+                    <span><strong>未来 7 天</strong><small>计划任务、会议与外部日程</small></span>
+                    <button use:obsidianIcon={snapshot.calendar.state === "ready" ? "calendar-clock" : "plug-zap"} class:active={snapshot.calendar.state === "ready"} disabled={snapshot.calendar.state === "unavailable"} aria-label={calendarIntegrationTitle()} title={calendarIntegrationTitle()} on:click={() => run(useCalendarIntegration, "日程已打开")}></button>
+                  </header>
+                  <div class="qwb-schedule-agenda">
+                    {#each scheduleAgendaGroups(item) as group (group.date)}
+                      <section>
+                        <header><time>{calendarDateLabel(group.date)}</time><span>{group.entries.length} 项</span></header>
+                        <div>
+                          {#each group.entries as entry (entry.id)}
+                            <button class:completed={entry.completed} on:click={() => openCalendarEntry(entry)}>
+                              <time>{entry.time || "全天"}</time>
+                              <i class={calendarDotClass(entry)}></i>
+                              <span><strong>{entry.title}</strong><small>{entry.subtitle}</small></span>
+                              <em>{entry.kind === "meeting" ? "会议" : entry.kind === "event" ? "日程" : "计划"}</em>
+                            </button>
+                          {/each}
+                        </div>
+                      </section>
+                    {:else}
+                      <div class="qwb-schedule-empty"><i use:obsidianIcon={"calendar-check"}></i><strong>未来 7 天没有已安排日程</strong><small>只有截止日期的任务会留在“任务日历”。</small></div>
+                    {/each}
                   </div>
-                </section>
-              </div>
+                </div>
+              {:else}
+                <div class="qwb-month-calendar">
+                  <header class="qwb-month-calendar-toolbar">
+                    <button use:obsidianIcon={"chevron-left"} aria-label="上个月" title="上个月" on:click={() => moveCalendarMonth(item, -1)}></button>
+                    <strong>{calendarMonthLabel(calendarState(item, calendarViewStates[itemKey(item)]).month)}</strong>
+                    <button class="qwb-calendar-today" on:click={() => resetCalendarToday(item)}>今天</button>
+                    <button use:obsidianIcon={"chevron-right"} aria-label="下个月" title="下个月" on:click={() => moveCalendarMonth(item, 1)}></button>
+                  </header>
+                  <div class="qwb-month-calendar-weekdays" aria-hidden="true">{#each ["一", "二", "三", "四", "五", "六", "日"] as weekday}<span>{weekday}</span>{/each}</div>
+                  <div class="qwb-month-calendar-grid">
+                    {#each calendarCells(item, calendarViewStates[itemKey(item)]) as cell (cell.date)}
+                      <button class:outside={!cell.inMonth} class:today={cell.isToday} class:selected={calendarState(item, calendarViewStates[itemKey(item)]).selected === cell.date} aria-label={`${cell.date}，${calendarEntriesForDate(item, cell.date).length} 项`} title={`${cell.date} · ${calendarEntriesForDate(item, cell.date).length} 项`} on:click={() => setCalendarDate(item, cell.date)}>
+                        <time>{cell.day}</time>
+                        <span class="qwb-calendar-dots">
+                          {#each calendarEntriesForDate(item, cell.date).slice(0, 3) as entry (entry.id)}<i class={calendarDotClass(entry)}></i>{/each}
+                          {#if calendarEntriesForDate(item, cell.date).length > 3}<small>{calendarEntriesForDate(item, cell.date).length}</small>{/if}
+                        </span>
+                      </button>
+                    {/each}
+                  </div>
+                  <section class="qwb-calendar-detail">
+                    <header><strong>{calendarDateLabel(calendarState(item, calendarViewStates[itemKey(item)]).selected)}</strong><span>{calendarEntriesForDate(item, calendarState(item, calendarViewStates[itemKey(item)]).selected).length} 项</span></header>
+                    <div>
+                      {#each calendarEntriesForDate(item, calendarState(item, calendarViewStates[itemKey(item)]).selected) as entry (entry.id)}
+                        <button class:overdue={entry.overdue} class:completed={entry.completed} on:click={() => openCalendarEntry(entry)}><i class={calendarDotClass(entry)}></i><span><strong>{entry.title}</strong><small>{entry.subtitle}</small></span><em>{entry.kind === "meeting" ? "会议" : entry.completed ? "已完成" : "截止"}</em></button>
+                      {:else}<p class="qwb-empty">这一天没有{dataSource(item) === "meetings" ? "会议" : "截止任务"}。</p>{/each}
+                    </div>
+                  </section>
+                </div>
+              {/if}
             {:else if item.widgetId === "tasks.quadrant" || (item.widgetId === "view.quadrant" && dataSource(item) === "tasks")}
               <div class="qwb-quadrants">
                 {#each [["important-urgent", "重要且紧急"], ["important", "重要不紧急"], ["urgent", "紧急不重要"], ["later", "不重要不紧急"]] as quadrant}
@@ -2006,7 +1874,7 @@
               {:else if dataSource(item) === "suppliers"}
                 {#each selectedSupplier(item) ? [selectedSupplier(item)!] : [] as supplier}<div class="qwb-project-summary"><button class="qwb-summary-title" on:click={() => controller.openPath(supplier.path)}><span class="qwb-entity-icon supplier">S</span><span><strong>{supplier.name}</strong><small>{supplier.detail || supplier.related || "供应商"}</small></span><em>{supplier.status || "未设置"}</em></button><dl><div><dt>状态</dt><dd>{supplier.status || "未设置"}</dd></div><div><dt>关联</dt><dd>{supplier.related || "未关联"}</dd></div><div><dt>更新时间</dt><dd>{supplier.updatedAt ? new Date(supplier.updatedAt).toLocaleDateString("zh-CN") : "未知"}</dd></div></dl><div class="qwb-summary-actions"><button on:click={() => (sharedSupplierPath = supplier.path)}>设为共享供应商</button><button on:click={() => controller.openPath(supplier.path)}>打开供应商</button><button on:click={() => controller.openYolo(supplier.path)}>YOLO</button></div></div>{:else}<p class="qwb-empty">请先选择供应商。</p>{/each}
               {:else}
-                {#each selectedProject(item) ? [selectedProject(item)!] : [] as project}<div class="qwb-project-summary"><button class="qwb-summary-title" on:click={() => controller.openPath(project.path)}><span class="qwb-entity-icon project">P</span><span><strong>{project.name}</strong><small>{projectClientLabel(project)}</small></span><em>{project.status || "开放"}</em></button><dl><div><dt>客户</dt><dd>{projectClientLabel(project)}</dd></div><div><dt>类型</dt><dd>{project.projectType || "未设置"}</dd></div><div><dt>阶段</dt><dd>{project.phase || "未设置"}</dd></div><div><dt>目标日期</dt><dd>{project.due || "未设置"}</dd></div><div><dt>任务</dt><dd>{projectHealth(project).completed}/{projectHealth(project).completed + projectHealth(project).open} 已完成</dd></div><div><dt>最近更新</dt><dd>{projectUpdatedLabel(project)}</dd></div></dl><div class="qwb-project-next"><small>明确下一步</small><p>{project.detail || "尚未填写明确下一步。"}</p></div><div class="qwb-summary-actions"><button disabled={sharedProjectPath === project.path} on:click={() => (sharedProjectPath = project.path)}>{sharedProjectPath === project.path ? "当前共享项目" : "设为共享项目"}</button><button on:click={() => controller.openPath(project.path)}>打开项目</button><button on:click={() => controller.openYolo(project.path)}>YOLO</button></div></div>{:else}<p class="qwb-empty">请选择或配置一个项目。</p>{/each}
+                {#each selectedProject(item) ? [selectedProject(item)!] : [] as project}<div class="qwb-project-summary"><button class="qwb-summary-title" on:click={() => controller.openPath(project.path)}><span class="qwb-entity-icon project">P</span><span><strong>{project.name}</strong><small>{projectClientLabel(project)}</small></span><em>{project.status || "开放"}</em></button><dl><div><dt>客户</dt><dd>{projectClientLabel(project)}</dd></div><div><dt>类型</dt><dd>{project.projectType || "未设置"}</dd></div><div><dt>研制阶段</dt><dd>{project.phase || "未设置"}</dd></div><div><dt>目标日期</dt><dd>{project.due || "未设置"}</dd></div><div><dt>任务</dt><dd>{projectHealth(project).completed}/{projectHealth(project).completed + projectHealth(project).open} 已完成</dd></div><div><dt>最近更新</dt><dd>{projectUpdatedLabel(project)}</dd></div></dl><div class="qwb-project-next"><small>明确下一步</small><p>{project.detail || "尚未填写明确下一步。"}</p></div><div class="qwb-summary-actions"><button disabled={sharedProjectPath === project.path} on:click={() => (sharedProjectPath = project.path)}>{sharedProjectPath === project.path ? "当前共享项目" : "设为共享项目"}</button><button on:click={() => controller.openPath(project.path)}>打开项目</button><button on:click={() => controller.openYolo(project.path)}>YOLO</button></div></div>{:else}<p class="qwb-empty">请选择或配置一个项目。</p>{/each}
               {/if}
             {:else if item.widgetId === "projects.health" || (item.widgetId === "view.metrics" && metricKind(item) === "health")}
               <div class="qwb-health-list">{#each scopedProjects(item) as project}<button on:click={() => controller.openPath(project.path)}><header><i class={projectHealth(project).level}></i><span><strong>{project.name}</strong><small>{projectClientLabel(project)}</small></span><em class={projectHealth(project).level}>{healthLabel(projectHealth(project).level)}</em></header><p>{projectHealth(project).reasons.join(" · ") || "没有发现风险信号"}</p><dl><div><dt>逾期</dt><dd>{projectHealth(project).overdue}</dd></div><div><dt>7 天内</dt><dd>{projectHealth(project).dueSoon}</dd></div><div><dt>待处理</dt><dd>{projectHealth(project).open}</dd></div><div><dt>未安排</dt><dd>{projectHealth(project).unscheduled}</dd></div></dl></button>{:else}<p class="qwb-empty">请选择或配置项目。</p>{/each}</div>
@@ -2131,9 +1999,6 @@
               {/if}
             {/if}
           </div>
-          {#if isDesktop && layoutEditMode}
-            <button use:obsidianIcon={"scaling"} class="qwb-resize-handle" aria-label={`调整${widgetTitle(item)}大小`} title="拖动调整大小" on:pointerdown={(event) => beginPointer(event, item, "resize")}></button>
-          {/if}
         {/if}
       </section>
     {/each}
@@ -2182,6 +2047,12 @@
     <div class="qwb-modal qwb-widget-settings" role="dialog" aria-modal="true" aria-labelledby="qwb-widget-settings-title">
       <header><div><span class="qwb-eyebrow">WIDGET INSTANCE</span><h2 id="qwb-widget-settings-title">{widgetTitle(editingWidget)}设置</h2></div><button aria-label="关闭" on:click={() => (editingWidget = undefined)}>×</button></header>
       <label>组件名称<input bind:value={editingTitle} placeholder="例如：客户 A 待跟进" /></label>
+      <fieldset class="qwb-widget-size-editor">
+        <legend>组件尺寸</legend>
+        <label>宽度<select bind:value={editingCols}><option value={1}>窄 · 1 列</option><option value={2}>标准 · 2 列</option><option value={3}>宽 · 3 列</option><option value={4}>整行 · 4 列</option></select></label>
+        <label>高度<select bind:value={editingRows}>{#each [1, 2, 3, 4, 5, 6, 7, 8] as row}<option value={row}>{row === 1 ? "紧凑" : row === 2 ? "标准" : `${row} 行`}</option>{/each}</select></label>
+        <small>布局按阅读顺序自动排列，不再需要拖到精确坐标。</small>
+      </fieldset>
       {#if editingWidget.widgetId.startsWith("view.") || editingWidget.widgetId.startsWith("control.") || editingWidget.widgetId.startsWith("tasks.") || editingWidget.widgetId.startsWith("projects.")}
         <label>数据源<select value={String(configSection(editingConfig, "source").kind ?? (editingWidget.widgetId.startsWith("projects.") ? "projects" : "tasks"))} on:change={(event) => updateEditingSource({ kind: (event.currentTarget as HTMLSelectElement).value })}><option value="tasks">任务</option><option value="projects">项目</option><option value="clients">客户</option><option value="suppliers">供应商</option><option value="meetings">会议</option><option value="knowledge">知识</option><option value="mixed">混合</option></select></label>
         <label>数据范围<select value={String(configSection(editingConfig, "source").scopeMode ?? editingConfig.scopeMode ?? "all")} on:change={(event) => updateEditingSource({ scopeMode: (event.currentTarget as HTMLSelectElement).value })}><option value="all">全部数据</option><option value="shared">跟随同类选择器</option><option value="context">跟随当前笔记</option><option value="fixed">固定实体</option></select></label>
@@ -2226,7 +2097,7 @@
         <label>类型<select bind:value={entityKind}><option value="project">项目</option><option value="client">客户</option><option value="meeting">会议</option><option value="supplier">供应商</option></select></label>
         <label>名称<input bind:value={entityName} placeholder="输入清晰、可检索的名称" /></label>
         {#if entityKind === "project"}<label>关联客户<select bind:value={relatedClient}><option value="">暂不关联</option>{#each snapshot.clients as client}<option value={client.path}>{client.name}</option>{/each}</select></label><button class="qwb-text-action" type="button" on:click={() => beginNestedEntity("client")}>＋ 没有客户？先创建客户</button>{/if}
-        {#if entityKind === "meeting"}<label>关联项目<select bind:value={relatedProject}><option value="">暂不关联</option>{#each snapshot.projects as project}<option value={project.path}>{project.name}</option>{/each}</select></label><button class="qwb-text-action" type="button" on:click={() => beginNestedEntity("project")}>＋ 没有项目？先创建项目</button><label>日期<input type="date" bind:value={entityDate} /></label>{/if}
+        {#if entityKind === "meeting"}<label>关联项目<select bind:value={relatedProject}><option value="">暂不关联</option>{#each snapshot.projects as project}<option value={project.path}>{project.name}</option>{/each}</select></label><button class="qwb-text-action" type="button" on:click={() => beginNestedEntity("project")}>＋ 没有项目？先创建项目</button><label>日期<input type="date" bind:value={entityDate} /></label><div class="qwb-form-row"><label>开始时间<input type="time" bind:value={entityStartTime} /></label><label>结束时间<input type="time" min={entityStartTime || undefined} bind:value={entityEndTime} /></label></div>{/if}
         <div class="qwb-inline-preview"><strong>写入预览</strong><div>{entityTargetFolder()}/{entityKind === "meeting" && entityDate ? `${entityDate} ` : ""}{entityName || "未命名"}.md</div><small>确认后仍会执行模板、重名与路径预检。</small></div>
         <button class="qwb-text-action" type="button" disabled={!entityName.trim() || busy} on:click={() => run(previewEntityTemplate, "模板预览已生成")}>生成完整模板预览</button>
         {#if entityTemplatePreview}<pre class="qwb-template-preview">{entityTemplatePreview}</pre>{/if}
@@ -2236,12 +2107,17 @@
         <label>任务<textarea bind:value={taskText} rows="3" placeholder="描述下一步具体行动"></textarea></label>
         <div class="qwb-form-row"><label>截止日期<input type="date" bind:value={taskDue} /></label><label>优先级<select bind:value={taskPriority}><option value="highest">最高</option><option value="high">高</option><option value="normal">普通</option><option value="low">低</option><option value="lowest">最低</option></select></label></div>
         <div class="qwb-inline-preview"><strong>写入预览</strong><div>{taskText || "未填写任务"}{taskDue ? ` · 截止 ${taskDue}` : ""}</div><small>{projectPath || "尚未选择项目"}</small></div>
-        <div class="qwb-modal-actions"><button class="qwb-button qwb-button-subtle" on:click={() => (dialog = null)}>取消</button><button class="qwb-button qwb-button-primary" disabled={!controller.settings.writesEnabled || !projectPath || !taskText.trim() || busy} on:click={submitTask}>添加任务</button></div>
+        <div class="qwb-modal-actions"><button class="qwb-button qwb-button-subtle" on:click={() => (dialog = null)}>取消</button>{#if controller.tasksIntegrationAvailable()}<button class="qwb-button" disabled={!controller.settings.writesEnabled || !projectPath || busy} on:click={submitTaskWithTasks}>Tasks 高级新建</button>{/if}<button class="qwb-button qwb-button-primary" disabled={!controller.settings.writesEnabled || !projectPath || !taskText.trim() || busy} on:click={submitTask}>添加任务</button></div>
       {:else if dialog === "task-edit"}
         {#if taskEditReason}<div class="qwb-inline-warning">{taskEditReason}</div>{/if}
         <p>{selectedTask?.text}</p>
         <div class="qwb-form-row"><label>截止日期<input type="date" bind:value={taskDue} /></label><label>优先级<select bind:value={taskPriority}><option value="highest">最高</option><option value="high">高</option><option value="normal">普通</option><option value="low">低</option><option value="lowest">最低</option></select></label></div>
         <div class="qwb-modal-actions"><button class="qwb-button qwb-button-subtle" on:click={() => (dialog = null)}>取消</button><button class="qwb-button qwb-button-primary" disabled={!controller.settings.writesEnabled || busy} on:click={submitTaskEdit}>保存</button></div>
+      {:else if dialog === "schedule"}
+        <p class="qwb-schedule-task">{selectedTask?.text}</p>
+        <label>计划日期<input type="date" bind:value={taskScheduled} /></label>
+        <div class="qwb-inline-preview"><strong>日期职责保持分离</strong><div>计划日期使用 Tasks 的 ⏳ 字段；原有 📅 截止日期不会改变。</div><small>保存后可在 Full Calendar 中继续拖到具体时间段。</small></div>
+        <div class="qwb-modal-actions"><button class="qwb-button qwb-button-subtle" on:click={() => (dialog = null)}>取消</button><button class="qwb-button" on:click={() => run(() => controller.openCalendar())}>打开完整日程</button><button class="qwb-button qwb-button-primary" disabled={!controller.settings.writesEnabled || !taskScheduled || busy} on:click={submitTaskSchedule}>保存计划日期</button></div>
       {:else if dialog === "migrate"}
         <p>预览：将 {migrationTasks.length} 条会议草稿迁移到同一目标项目或客户。每条行动都有独立回执；成功项写入稳定来源标记，重复执行不会重复创建。</p>
         <div class="qwb-inline-preview">{#each migrationTasks.slice(0, 8) as task}<div>• {task.text} <small>{task.sourceName}</small></div>{/each}</div>

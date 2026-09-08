@@ -10,6 +10,7 @@ import {
 } from "../domain/markdown";
 import { RevisionConflictError } from "../domain/transactions";
 import { WriteTransactionExecutor } from "./transaction-service";
+import { TasksApiAdapter } from "./tasks-api-adapter";
 import type { VaultPort } from "./vault-port";
 
 export interface AddProjectTaskInput {
@@ -21,8 +22,20 @@ export interface AddProjectTaskInput {
   blockId?: string;
 }
 
+export type TasksWriteResult =
+  | { status: "unavailable" | "cancelled" }
+  | { status: "committed"; receipt: DetailedTransactionReceipt };
+
 export class ProjectTaskService {
-  constructor(private readonly vault: VaultPort, private readonly transactions: WriteTransactionExecutor) {}
+  constructor(
+    private readonly vault: VaultPort,
+    private readonly transactions: WriteTransactionExecutor,
+    private readonly tasksApi?: TasksApiAdapter
+  ) {}
+
+  isTasksIntegrationAvailable(): boolean {
+    return this.tasksApi?.isAvailable() ?? false;
+  }
 
   async addTask(path: string, input: AddProjectTaskInput): Promise<DetailedTransactionReceipt> {
     const before = await this.vault.read(path);
@@ -39,15 +52,34 @@ export class ProjectTaskService {
     });
   }
 
+  async addTaskWithTasks(path: string, heading = "## 待办"): Promise<TasksWriteResult> {
+    const modal = await this.tasksApi?.createTaskLine() ?? { status: "unavailable" as const };
+    if (modal.status !== "submitted") return modal;
+    const before = await this.vault.read(path);
+    const taskLines = ensureTaskBlockIds(modal.text, path, before);
+    const after = appendToSection(before, heading, taskLines);
+    const receipt = await this.transactions.execute({
+      label: `Add Tasks task to ${path}`,
+      operations: [{ kind: "write", path, content: after, expectedRevision: contentRevision(before) }]
+    });
+    return { status: "committed", receipt };
+  }
+
+  async editTaskWithTasks(task: TaskRecord): Promise<TasksWriteResult> {
+    if (!this.tasksApi?.isAvailable()) return { status: "unavailable" };
+    const current = await this.readCurrentTask(task);
+    const modal = await this.tasksApi.editTaskLine(current.raw);
+    if (modal.status !== "submitted") return modal;
+    const replacement = preserveExpectedBlockId(modal.text, current.blockId);
+    const receipt = await this.mutate(task, () => replacement, "Edit task with Tasks");
+    return { status: "committed", receipt };
+  }
+
   async complete(task: TaskRecord, completed = true, completedOn = new Date()): Promise<DetailedTransactionReceipt> {
-    return this.mutate(task, (raw) => preserveBlockId(raw, (withoutBlock) => {
-      const match = withoutBlock.match(TASK_PATTERN);
-      if (!match) throw new Error("The target line is no longer a Markdown task.");
-      let body = match[3] ?? "";
-      body = body.replace(/\s*✅\s*\d{4}-\d{2}-\d{2}/gu, "").trimEnd();
-      if (completed) body = `${body} ✅ ${toLocalDate(completedOn)}`;
-      return `${match[1] ?? ""}- [${completed ? "x" : " "}] ${body}`;
-    }), completed ? "Complete task" : "Reopen task");
+    return this.mutate(task, (raw, current) => {
+      if (current.completed === completed) return raw;
+      return this.tasksApi?.toggleTask(raw, task.path) ?? renderCompletion(raw, completed, completedOn);
+    }, completed ? "Complete task" : "Reopen task");
   }
 
   async reschedule(task: TaskRecord, due?: string): Promise<DetailedTransactionReceipt> {
@@ -78,33 +110,48 @@ export class ProjectTaskService {
       throw new Error("Task update has no changed fields.");
     }
     validateOptionalDate(patch.due ?? undefined, "due");
-    return this.mutate(task, (raw) => preserveBlockId(raw, (withoutBlock) => {
-      let updated = withoutBlock;
-      if (patch.completed !== undefined) {
-        const match = updated.match(TASK_PATTERN);
-        if (!match) throw new Error("The target line is no longer a Markdown task.");
-        let body = (match[3] ?? "").replace(/\s*✅\s*\d{4}-\d{2}-\d{2}/gu, "").trimEnd();
-        if (patch.completed) body = `${body} ✅ ${toLocalDate(completedOn)}`;
-        updated = `${match[1] ?? ""}- [${patch.completed ? "x" : " "}] ${body}`;
-      }
+    return this.mutate(task, (raw, current) => {
+      let updated = raw;
       if (Object.prototype.hasOwnProperty.call(patch, "due")) {
-        updated = updated.replace(/\s*📅\s*\d{4}-\d{2}-\d{2}/gu, "").trimEnd();
-        if (patch.due) updated = `${updated} 📅 ${patch.due}`;
+        updated = preserveBlockId(updated, (withoutBlock) => {
+          const withoutDue = withoutBlock.replace(/\s*📅\s*\d{4}-\d{2}-\d{2}/gu, "").trimEnd();
+          return patch.due ? `${withoutDue} 📅 ${patch.due}` : withoutDue;
+        });
       }
       if (patch.priority !== undefined) {
-        updated = updated.replace(/\s*(?:⏫|🔺|🔼|🔽|⏬|🔻)/gu, "").trimEnd();
-        const emoji = priorityEmoji(patch.priority);
-        if (emoji) updated = `${updated} ${emoji}`;
+        updated = preserveBlockId(updated, (withoutBlock) => {
+          const withoutPriority = withoutBlock.replace(/\s*(?:⏫|🔺|🔼|🔽|⏬|🔻)/gu, "").trimEnd();
+          const emoji = priorityEmoji(patch.priority ?? "normal");
+          return emoji ? `${withoutPriority} ${emoji}` : withoutPriority;
+        });
+      }
+      if (patch.completed !== undefined && current.completed !== patch.completed) {
+        updated = this.tasksApi?.toggleTask(updated, task.path) ?? renderCompletion(updated, patch.completed, completedOn);
       }
       return updated;
-    }), "Update task");
+    }, "Update task");
   }
 
   private async mutate(
     task: TaskRecord,
-    transform: (raw: string) => string,
+    transform: (raw: string, current: ParsedTask) => string | Promise<string>,
     label: string
   ): Promise<DetailedTransactionReceipt> {
+    const { before, parsed, current } = await this.readCurrentTaskContext(task);
+    const lines = parsed.lines;
+    lines[current.line - 1] = await transform(current.raw, current);
+    const after = lines.join("\n");
+    return this.transactions.execute({
+      label: `${label}: ${task.text}`,
+      operations: [{ kind: "write", path: task.path, content: after, expectedRevision: contentRevision(before) }]
+    });
+  }
+
+  private async readCurrentTask(task: TaskRecord): Promise<ParsedTask> {
+    return (await this.readCurrentTaskContext(task)).current;
+  }
+
+  private async readCurrentTaskContext(task: TaskRecord): Promise<{ before: string; parsed: ReturnType<typeof parseMarkdown>; current: ParsedTask }> {
     const before = await this.vault.read(task.path);
     const parsed = parseMarkdown(before, {
       path: task.path,
@@ -116,13 +163,7 @@ export class ProjectTaskService {
     if (current.revision !== task.revision) {
       throw new RevisionConflictError(task.path, task.revision, current.revision);
     }
-    const lines = parsed.lines;
-    lines[current.line - 1] = transform(current.raw);
-    const after = lines.join("\n");
-    return this.transactions.execute({
-      label: `${label}: ${task.text}`,
-      operations: [{ kind: "write", path: task.path, content: after, expectedRevision: contentRevision(before) }]
-    });
+    return { before, parsed, current };
   }
 }
 
@@ -177,6 +218,36 @@ function preserveBlockId(raw: string, transform: (withoutBlock: string) => strin
   const withoutBlock = match ? raw.slice(0, match.index).trimEnd() : raw;
   const transformed = transform(withoutBlock).trimEnd();
   return match ? `${transformed} ${match[1]}` : transformed;
+}
+
+function renderCompletion(raw: string, completed: boolean, completedOn: Date): string {
+  return preserveBlockId(raw, (withoutBlock) => {
+    const match = withoutBlock.match(TASK_PATTERN);
+    if (!match) throw new Error("The target line is no longer a Markdown task.");
+    let body = (match[3] ?? "").replace(/\s*✅\s*\d{4}-\d{2}-\d{2}/gu, "").trimEnd();
+    if (completed) body = `${body} ✅ ${toLocalDate(completedOn)}`;
+    return `${match[1] ?? ""}- [${completed ? "x" : " "}] ${body}`;
+  });
+}
+
+function ensureTaskBlockIds(taskLines: string, path: string, content: string): string {
+  return taskLines.split("\n").map((line, index) => {
+    if (/\s+\^[A-Za-z0-9-]+\s*$/u.test(line)) return line;
+    const blockId = `qwb-${stableHash(`${path}\n${content.length}\n${index}\n${line}`)}`;
+    return `${line.trimEnd()} ^${blockId}`;
+  }).join("\n");
+}
+
+function preserveExpectedBlockId(taskLines: string, blockId?: string): string {
+  if (!blockId || new RegExp(`(?:^|\\s)\\^${escapeRegExp(blockId)}(?:\\s|$)`, "u").test(taskLines)) return taskLines;
+  const lines = taskLines.split("\n");
+  const last = lines.length - 1;
+  lines[last] = `${lines[last]?.trimEnd() ?? ""} ^${blockId}`;
+  return lines.join("\n");
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function toLocalDate(date: Date): string {

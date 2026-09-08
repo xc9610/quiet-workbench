@@ -6,6 +6,7 @@ describe("generic widget model", () => {
     const ids = presetsForType("view.list").map((preset) => preset.id);
     expect(ids).toEqual(expect.arrayContaining([
       "tasks.today-focus",
+      "tasks.unscheduled",
       "tasks.waiting",
       "tasks.week",
       "projects.list",

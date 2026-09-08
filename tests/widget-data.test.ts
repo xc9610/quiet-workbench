@@ -8,6 +8,7 @@ import {
   isWaitingTask,
   suggestedDueForTimeBucket,
   suggestedTaskBoardDrop,
+  taskListRows,
   taskQuadrant,
   taskTimeBucket
 } from "../src/domain/widget-data";
@@ -61,6 +62,18 @@ describe("independent widget data derivation", () => {
     expect(isWaitingTask(task({ text: "等待客户确认方案" }))).toBe(true);
     expect(isRecurringTask(task({ text: "每周整理项目进度 🔁" }))).toBe(true);
     expect(isWaitingTask(task({ text: "完成接口开发" }))).toBe(false);
+  });
+
+  it("filters unscheduled tasks before applying the component limit", () => {
+    const dated = Array.from({ length: 35 }, (_, index) => task({ id: `dated-${index}`, due: "2026-09-10" }));
+    const rows = taskListRows([
+      ...dated,
+      task({ id: "normal-undated" }),
+      task({ id: "high-undated", priority: "high" }),
+      task({ id: "scheduled", scheduled: "2026-09-02" })
+    ], "unscheduled", "2026-08-31", "2026-09-07", 10);
+
+    expect(rows.map((item) => item.id)).toEqual(["high-undated", "normal-undated"]);
   });
 
   it("calculates project health, progress and reasons read-only", () => {

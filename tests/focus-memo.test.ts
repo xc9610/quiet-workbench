@@ -78,17 +78,17 @@ describe("quick memo content", () => {
   const morning = { date: "2026-08-18", time: "08:42" };
 
   it("creates dated entries and preserves existing bytes while appending", () => {
-    expect(appendQuickMemoContent("", "第一条", morning)).toBe("# Workbench速记\n\n## 2026-08-18\n\n- 08:42 第一条\n");
+    expect(appendQuickMemoContent("", "第一条", morning)).toBe("# Asterism 速记\n\n## 2026-08-18\n\n- 08:42 第一条\n");
     const before = "原文  \n\n";
     expect(appendQuickMemoContent(before, "第二条", morning)).toBe(`${before}## 2026-08-18\n\n- 08:42 第二条\n`);
-    const sameDay = "# Workbench速记\n\n## 2026-08-18\n\n- 08:42 第一条\n";
+    const sameDay = "# Asterism 速记\n\n## 2026-08-18\n\n- 08:42 第一条\n";
     expect(appendQuickMemoContent(sameDay, "第二条\n补充说明", { date: "2026-08-18", time: "09:15" }))
       .toBe(`${sameDay}- 09:15 第二条\n  补充说明\n`);
   });
 
   it("rejects empty content and returns structured recent entries", () => {
     expect(() => appendQuickMemoContent("existing", "  \n ", morning)).toThrow(/不能为空/);
-    const content = "# Workbench速记\n\n## 2026-08-18\n\n- 08:42 一\n- 09:15 二\n  补充\n\n## 2026-08-19\n\n- 07:30 三\n";
+    const content = "# Asterism 速记\n\n## 2026-08-18\n\n- 08:42 一\n- 09:15 二\n  补充\n\n## 2026-08-19\n\n- 07:30 三\n";
     expect(recentQuickMemoEntries(content, 2)).toEqual([
       { date: "2026-08-19", time: "07:30", text: "三" },
       { date: "2026-08-18", time: "09:15", text: "二\n补充" }

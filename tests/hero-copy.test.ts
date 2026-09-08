@@ -5,6 +5,7 @@ import {
   selectHeroCopy,
   serializeHeroCopies
 } from "../src/core/hero-copy";
+import { buildHeroContext, buildHeroMetrics } from "../src/domain/hero-metrics";
 
 const emptyContext = { overdue: 0, dueToday: 0, upcoming: 0, missingNext: 0 };
 
@@ -41,5 +42,24 @@ describe("hero copy", () => {
     const result = selectHeroCopy({ mode: "custom", customCopies: [] }, "2026-08-27", emptyContext);
     expect(result.title.length).toBeGreaterThan(0);
     expect(result.subtitle.length).toBeGreaterThan(0);
+  });
+
+  it("summarizes only actionable tasks for a stable date", () => {
+    const context = buildHeroContext({
+      tasks: [
+        { completed: false, due: "2026-08-30" },
+        { completed: false, scheduled: "2026-08-31", due: "2026-09-09" },
+        { completed: false, due: "2026-09-04" },
+        { completed: true, due: "2026-08-30" },
+        { completed: false, migrated: true, due: "2026-08-30" }
+      ],
+      projects: [{ detail: "下一步" }, { detail: "  " }]
+    }, "2026-08-31");
+
+    expect(context).toEqual({ overdue: 1, dueToday: 1, upcoming: 1, missingNext: 1 });
+    expect(buildHeroMetrics(context)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: "逾期任务", value: 1, tone: "danger" }),
+      expect.objectContaining({ label: "今天到期", value: 1, tone: "accent" })
+    ]));
   });
 });

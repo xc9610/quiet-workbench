@@ -5,8 +5,8 @@ export const ORDERED_GRID_MAX_SPAN = 4;
 export const ORDERED_GRID_MAX_ROWS = 8;
 
 /**
- * Convert the former twelve-column absolute layout to Xove Dashboard's
- * ordered-card model: DOM order decides placement and each card only owns a
+ * Convert the former twelve-column absolute layout to the ordered-card model:
+ * DOM order decides placement and each card only owns a
  * column/row span. The old x/y/width/height values remain on the item for
  * backwards-compatible exports; callers keep a complete pre-migration backup.
  */

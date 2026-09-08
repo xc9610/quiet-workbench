@@ -239,6 +239,65 @@ export function ensureActivityHeatmap(persisted: LayoutSchema[]): LayoutSchema[]
   });
 }
 
+/** Adds the consolidated schedule calendar once without replacing user components. */
+export function ensureScheduleOverview(persisted: LayoutSchema[]): LayoutSchema[] {
+  return persisted.map((layout) => {
+    const upgraded = cloneLayout(layout);
+    if (upgraded.id !== "workbench" || upgraded.surface !== "workbench") return upgraded;
+    if (upgraded.items.some((item) => item.presetId === "schedule.overview")) return upgraded;
+    const y = upgraded.items.reduce((bottom, item) => Math.max(bottom, item.y + item.height), 0);
+    upgraded.items.push({
+      widgetId: "view.calendar",
+      instanceId: "view.calendar-schedule-overview-1",
+      title: "日程总览",
+      presetId: "schedule.overview",
+      x: 0,
+      y,
+      width: 12,
+      height: 6,
+      config: {
+        source: { kind: "mixed", scopeMode: "all" },
+        query: { limit: 100, includeCompleted: false },
+        display: {},
+        actions: []
+      }
+    });
+    return upgraded;
+  });
+}
+
+/** Adds a strict no-date task list once while preserving all user component settings and sizes. */
+export function ensureUnscheduledTaskList(persisted: LayoutSchema[]): LayoutSchema[] {
+  return persisted.map((layout) => {
+    const upgraded = cloneLayout(layout);
+    if (upgraded.id !== "workbench" || upgraded.surface !== "workbench") return upgraded;
+    if (upgraded.items.some((item) => item.presetId === "tasks.unscheduled")) return upgraded;
+    const afterMeeting = upgraded.items.findIndex((item) => item.presetId === "meetings.upcoming");
+    const afterFocus = upgraded.items.findIndex((item) => item.presetId === "tasks.today-focus" || item.widgetId === "tasks.today");
+    const insertionIndex = Math.max(afterMeeting, afterFocus) + 1;
+    upgraded.items.splice(insertionIndex, 0, {
+      widgetId: "view.list",
+      instanceId: "view.list-tasks-unscheduled-1",
+      title: "未安排任务",
+      presetId: "tasks.unscheduled",
+      x: 0,
+      y: insertionIndex,
+      width: 6,
+      height: 6,
+      cols: 2,
+      rows: 3,
+      config: {
+        source: { kind: "tasks", scopeMode: "all", taskScopes: ["project", "client", "meeting-draft"] },
+        query: { mode: "unscheduled", limit: 15, includeCompleted: false },
+        display: {},
+        actions: ["complete", "schedule", "edit"]
+      }
+    });
+    upgraded.items = upgraded.items.map((item, index) => ({ ...item, x: 0, y: index }));
+    return upgraded;
+  });
+}
+
 function activityHeatmapConfig(): Record<string, unknown> {
   return {
     source: { kind: "mixed", scopeMode: "all" },
@@ -316,16 +375,18 @@ function isPreMemoDefaultSidebar(layout: LayoutSchema): boolean {
   });
 }
 
-/** Creates the single visible workbench from the user's last active layout without removing legacy layouts. */
+/** Keeps one editable workbench while preserving sidebar layouts. */
 export function ensureSingleWorkbenchLayout(persisted: LayoutSchema[], activeId?: string): LayoutSchema[] {
   const copies = persisted.map(cloneLayout);
-  if (copies.some((layout) => layout.surface === "workbench" && layout.id === "workbench")) return copies;
-  const source = copies.find((layout) => layout.surface === "workbench" && layout.id === activeId)
+  const source = copies.find((layout) => layout.surface === "workbench" && layout.id === "workbench")
+    ?? copies.find((layout) => layout.surface === "workbench" && layout.id === activeId)
     ?? copies.find((layout) => layout.surface === "workbench" && layout.id === "today")
     ?? copies.find((layout) => layout.surface === "workbench")
     ?? cloneLayout(layouts.find((layout) => layout.id === "workbench")!);
-  copies.push({ ...cloneLayout(source), id: "workbench", name: "工作台", surface: "workbench" });
-  return copies;
+  return [
+    { ...cloneLayout(source), id: "workbench", name: "工作台", surface: "workbench" },
+    ...copies.filter((layout) => layout.surface === "sidebar")
+  ];
 }
 
 function migrateLayoutWidgets(layout: LayoutSchema): LayoutSchema {

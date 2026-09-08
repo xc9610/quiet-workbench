@@ -13,12 +13,14 @@
   let snapshot: WorkbenchSnapshot = controller.getSnapshot() ?? EMPTY_SNAPSHOT;
   let unsubscribe = () => {};
   let upcoming: TaskRecord[] = [];
+  let contextOpenTasks: TaskRecord[] = [];
   let sidebarLayoutItems: LayoutItem[] = [];
   let memoDraft = "";
   let busy = false;
   let message = "";
 
   $: upcoming = collectUpcomingTasks([...sidebarTaskSource(snapshot.context, snapshot.context.tasks, snapshot.tasks)]);
+  $: contextOpenTasks = snapshot.context.tasks.filter((task) => !task.completed && !task.migrated);
   $: sidebarLayoutItems = resolveSidebarItems(
     resolveSidebarProfile(snapshot.context),
     controller.settings.sidebarProfiles,
@@ -128,8 +130,8 @@
       </section>
     {:else if item.widgetId === "tasks.context"}
       <section class:collapsed={item.collapsed}>
-        <div class="qwb-section-title"><h3><i use:obsidianIcon={"check-square"}></i>相关任务</h3><strong>{snapshot.context.tasks.length}</strong></div>
-        {#if !item.collapsed}{#each snapshot.context.tasks.slice(0, 8) as task}<button class="qwb-context-row" on:click={() => controller.openPath(task.path)}><i class={task.scope} use:obsidianIcon={scopeIcon(task.scope)}></i><span>{task.text}</span>{#if task.due}<time>{task.due}</time>{/if}</button>{:else}<p class="qwb-empty">当前笔记没有关联任务。</p>{/each}{/if}
+        <div class="qwb-section-title"><h3><i use:obsidianIcon={"check-square"}></i>相关任务</h3><strong>{contextOpenTasks.length}</strong></div>
+        {#if !item.collapsed}{#each contextOpenTasks.slice(0, 8) as task}<button class="qwb-context-row" on:click={() => controller.openPath(task.path)}><i class={task.scope} use:obsidianIcon={scopeIcon(task.scope)}></i><span>{task.text}</span>{#if task.due}<time>{task.due}</time>{/if}</button>{:else}<p class="qwb-empty">当前笔记没有未完成的关联任务。</p>{/each}{/if}
       </section>
     {:else if item.widgetId === "projects.context"}
       <section class:collapsed={item.collapsed}>
@@ -144,7 +146,7 @@
     {:else if item.widgetId === "core.quick-create"}
       <section class:collapsed={item.collapsed}>
         <div class="qwb-section-title"><h3><i use:obsidianIcon={"zap"}></i>快捷入口</h3></div>
-        {#if !item.collapsed}<div class="qwb-context-actions"><button on:click={() => controller.openWorkbench()}><i use:obsidianIcon={"asterism-mark"}></i>工作台</button><button on:click={() => controller.openTaskBoard()}><i use:obsidianIcon={"list-todo"}></i>任务看板</button><button disabled={busy} on:click={() => run(() => controller.refresh(), "已刷新")}><i use:obsidianIcon={"refresh-cw"}></i>刷新</button></div>{/if}
+        {#if !item.collapsed}<div class="qwb-context-actions"><button disabled={busy || !controller.settings.writesEnabled} on:click={() => run(() => controller.createBlankNote(), "已打开新笔记")}><i use:obsidianIcon={"file-plus-2"}></i>新建笔记</button><button on:click={() => controller.openWorkbench()}><i use:obsidianIcon={"asterism-mark"}></i>工作台</button><button on:click={() => controller.openTaskBoard()}><i use:obsidianIcon={"list-todo"}></i>任务看板</button><button on:click={() => controller.openProjectReview()}><i use:obsidianIcon={"clipboard-check"}></i>项目审阅</button><button disabled={busy} on:click={() => run(() => controller.refresh(), "已刷新")}><i use:obsidianIcon={"refresh-cw"}></i>刷新</button></div>{/if}
       </section>
     {/if}
   {/each}
