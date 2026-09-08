@@ -43,6 +43,7 @@ import {
 import { isTasksApiV1 } from "./services/tasks-api-adapter";
 import { DEFAULT_SETTINGS, type QuietWorkbenchSettings } from "./settings";
 import { appendQuickMemoContent, normalizeQuickMemoEntry, recentQuickMemoEntries } from "./domain/memo";
+import { renderNoteMarkdown } from "./domain/note";
 import {
   buildProjectReviewAiPrompt,
   buildProjectReviewEvidence,
@@ -56,6 +57,7 @@ import type {
   AddProjectTaskInput,
   ContextSnapshot,
   CreateEntityInput,
+  CreateNoteInput,
   DiagnosticItem,
   EntitySummary,
   WorkbenchController,
@@ -293,6 +295,31 @@ class PluginWorkbenchController implements WorkbenchController {
     if (!commands?.executeCommandById("file-explorer:new-file")) {
       throw new Error("Obsidian 的“新建笔记”命令暂不可用。");
     }
+  }
+
+  async createNote(input: CreateNoteInput): Promise<TransactionReceipt> {
+    this.requireWrites();
+    const { path, content } = await this.previewNote(input);
+    const receipt = await this.transactions.execute({
+      label: `Create note: ${sanitizeTitle(input.title)}`,
+      operations: [{ kind: "create", path, content }]
+    });
+    await this.afterReceipt(receipt, path);
+    if (receipt.status === "committed" && input.openAfterCreate !== false) await this.openPath(path);
+    return receipt;
+  }
+
+  async previewNote(input: CreateNoteInput): Promise<{ path: string; content: string }> {
+    const title = sanitizeTitle(input.title);
+    const folder = input.folder?.trim() ? normalizeVaultPath(input.folder.trim()) : "";
+    const path = normalizeVaultPath(folder ? `${folder}/${title}.md` : `${title}.md`);
+    const content = renderNoteMarkdown({
+      title,
+      body: input.body,
+      relatedClient: input.relatedClient ? normalizeVaultPath(input.relatedClient) : undefined,
+      relatedProject: input.relatedProject ? normalizeVaultPath(input.relatedProject) : undefined
+    }, formatDate(new Date(), "YYYY-MM-DD"));
+    return { path, content };
   }
 
   async setActivePath(path?: string, surface: ContextSurface = "note"): Promise<void> {

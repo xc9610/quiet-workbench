@@ -5,6 +5,8 @@
   import type {
     AddProjectTaskInput,
     CreateEntityInput,
+    CreateNoteInput,
+    EntitySummary,
     WorkbenchController,
     WorkbenchSnapshot
   } from "../ui/controller";
@@ -76,11 +78,14 @@
     type CalendarEntry
   } from "../domain/calendar-entries";
   import LayoutEditorBar from "../ui/LayoutEditorBar.svelte";
+  import SearchableSelect from "../ui/SearchableSelect.svelte";
+  import type { SearchableOption } from "../ui/searchable-select";
 
   export let controller: WorkbenchController;
 
-  type DialogKind = "entity" | "task" | "task-edit" | "schedule" | "migrate" | "knowledge" | "yolo-preview" | null;
-  const UI_VERSION = "0.8.9";
+  type DialogKind = "note" | "entity" | "task" | "task-edit" | "schedule" | "migrate" | "knowledge" | "yolo-preview" | null;
+  const UI_VERSION = "0.8.10";
+  const DEFAULT_NOTE_FOLDER = "10_业务_Business/90_待整理_Inbox";
 
   interface EntityDraft {
     kind: Exclude<EntityKind, "knowledge">;
@@ -103,6 +108,11 @@
   let busy = false;
   let message = "";
   let dialog: DialogKind = null;
+  let noteTitle = "";
+  let noteFolder = DEFAULT_NOTE_FOLDER;
+  let noteBody = "";
+  let noteClient = "";
+  let noteProject = "";
   let entityKind: Exclude<EntityKind, "knowledge"> = "project";
   let entityName = "";
   let relatedClient = "";
@@ -1072,7 +1082,7 @@
 
   function dialogTitle(kind: DialogKind): string {
     if (!kind) return "工作流";
-    return { entity: "新建条目", task: "添加项目任务", "task-edit": "调整任务", schedule: "安排到日程", migrate: "迁移会议行动项", knowledge: "处理知识", "yolo-preview": "YOLO 处理预览" }[kind];
+    return { note: "新建笔记", entity: "新建条目", task: "添加项目任务", "task-edit": "调整任务", schedule: "安排到日程", migrate: "迁移会议行动项", knowledge: "处理知识", "yolo-preview": "YOLO 处理预览" }[kind];
   }
 
   function entityTargetFolder(): string {
@@ -1082,6 +1092,58 @@
       meeting: controller.settings.meetingFolder,
       supplier: controller.settings.supplierFolder
     }[entityKind];
+  }
+
+  function relationOptions(rows: readonly EntitySummary[], kindLabel: string): SearchableOption[] {
+    return rows.map((entry) => ({
+      value: entry.path,
+      label: entry.name,
+      description: [kindLabel, entry.status || entry.phase, entry.path].filter(Boolean).join(" · "),
+      keywords: [entry.client, entry.project, entry.projectType, entry.organizationType, entry.relationshipStatus]
+        .filter((value): value is string => Boolean(value))
+    }));
+  }
+
+  function clientOptions(): SearchableOption[] {
+    return relationOptions(snapshot.clients, "客户");
+  }
+
+  function projectOptions(): SearchableOption[] {
+    return relationOptions(snapshot.projects, "项目");
+  }
+
+  function meetingOptions(): SearchableOption[] {
+    return relationOptions(snapshot.meetings, "会议");
+  }
+
+  function supplierOptions(): SearchableOption[] {
+    return relationOptions(snapshot.suppliers, "供应商");
+  }
+
+  function migrationOptions(): SearchableOption[] {
+    return [...projectOptions(), ...clientOptions()];
+  }
+
+  function relationLabel(path: string): string {
+    return [...snapshot.projects, ...snapshot.clients, ...snapshot.meetings, ...snapshot.suppliers]
+      .find((entry) => entry.path === path)?.name ?? path;
+  }
+
+  function noteTargetPath(): string {
+    const folder = noteFolder.trim().replace(/\/+$/u, "");
+    return `${folder ? `${folder}/` : ""}${noteTitle.trim() || "未命名"}.md`;
+  }
+
+  function noteFolderSuggestions(): string[] {
+    return [...new Set([
+      DEFAULT_NOTE_FOLDER,
+      "20_技术_Technology/90_待整理_Inbox",
+      controller.settings.knowledgeFolder,
+      controller.settings.formalKnowledgeFolder,
+      controller.settings.projectFolder,
+      controller.settings.clientFolder,
+      controller.settings.meetingFolder
+    ].filter(Boolean))];
   }
 
   function enabled(item: LayoutItem): boolean {
@@ -1193,6 +1255,15 @@
     entityTemplatePreview = "";
     entityStack = [];
     dialog = "entity";
+  }
+
+  function openNote(): void {
+    noteTitle = "";
+    noteFolder = DEFAULT_NOTE_FOLDER;
+    noteBody = "";
+    noteClient = "";
+    noteProject = "";
+    dialog = "note";
   }
 
   function beginNestedEntity(kind: "client" | "project"): void {
@@ -1354,6 +1425,19 @@
     } finally {
       busy = false;
     }
+  }
+
+  async function submitNote(): Promise<void> {
+    const input: CreateNoteInput = {
+      title: noteTitle.trim(),
+      folder: noteFolder.trim() || undefined,
+      body: noteBody.trim() || undefined,
+      relatedClient: noteClient || undefined,
+      relatedProject: noteProject || undefined
+    };
+    if (!input.title) return;
+    const succeeded = await run(() => controller.createNote(input), "笔记已创建并打开");
+    if (succeeded) dialog = null;
   }
 
   async function submitTask(): Promise<void> {
@@ -1600,7 +1684,7 @@
           <div class="qwb-widget-body">
             {#if item.widgetId === "core.quick-create"}
               <div class="qwb-create-grid">
-                <button disabled={!controller.settings.writesEnabled} on:click={() => run(() => controller.createBlankNote(), "已打开新笔记")}><span>＋</span>笔记</button>
+                <button on:click={openNote}><span>＋</span>笔记</button>
                 <button on:click={() => openCreate("project")}><span>＋</span>项目</button>
                 <button on:click={() => openCreate("client")}><span>＋</span>客户</button>
                 <button on:click={() => openCreate("meeting")}><span>＋</span>会议</button>
@@ -2058,16 +2142,16 @@
         <label>数据范围<select value={String(configSection(editingConfig, "source").scopeMode ?? editingConfig.scopeMode ?? "all")} on:change={(event) => updateEditingSource({ scopeMode: (event.currentTarget as HTMLSelectElement).value })}><option value="all">全部数据</option><option value="shared">跟随同类选择器</option><option value="context">跟随当前笔记</option><option value="fixed">固定实体</option></select></label>
         {#if (configSection(editingConfig, "source").scopeMode ?? editingConfig.scopeMode) === "fixed"}
           {#if String(configSection(editingConfig, "source").kind ?? "tasks") === "clients"}
-            <label>固定客户<select value={String(configSection(editingConfig, "source").clientPath ?? editingConfig.clientPath ?? "")} on:change={(event) => updateEditingSource({ clientPath: (event.currentTarget as HTMLSelectElement).value })}><option value="">选择客户</option>{#each snapshot.clients as client}<option value={client.path}>{client.name}</option>{/each}</select></label>
+            <SearchableSelect id="qwb-widget-fixed-client" label="固定客户" value={String(configSection(editingConfig, "source").clientPath ?? editingConfig.clientPath ?? "")} options={clientOptions()} emptyLabel="不固定客户" onSelect={(value) => updateEditingSource({ clientPath: value })} />
           {:else if String(configSection(editingConfig, "source").kind ?? "tasks") === "meetings"}
-            <label>固定会议<select value={String(configSection(editingConfig, "source").meetingPath ?? "")} on:change={(event) => updateEditingSource({ meetingPath: (event.currentTarget as HTMLSelectElement).value })}><option value="">选择会议</option>{#each snapshot.meetings as meeting}<option value={meeting.path}>{meeting.name}</option>{/each}</select></label>
+            <SearchableSelect id="qwb-widget-fixed-meeting" label="固定会议" value={String(configSection(editingConfig, "source").meetingPath ?? "")} options={meetingOptions()} emptyLabel="不固定会议" onSelect={(value) => updateEditingSource({ meetingPath: value })} />
           {:else if String(configSection(editingConfig, "source").kind ?? "tasks") === "suppliers"}
-            <label>固定供应商<select value={String(configSection(editingConfig, "source").supplierPath ?? "")} on:change={(event) => updateEditingSource({ supplierPath: (event.currentTarget as HTMLSelectElement).value })}><option value="">选择供应商</option>{#each snapshot.suppliers as supplier}<option value={supplier.path}>{supplier.name}</option>{/each}</select></label>
+            <SearchableSelect id="qwb-widget-fixed-supplier" label="固定供应商" value={String(configSection(editingConfig, "source").supplierPath ?? "")} options={supplierOptions()} emptyLabel="不固定供应商" onSelect={(value) => updateEditingSource({ supplierPath: value })} />
           {:else}
-            <label>固定项目<select value={String(configSection(editingConfig, "source").projectPath ?? editingConfig.projectPath ?? "")} on:change={(event) => updateEditingSource({ projectPath: (event.currentTarget as HTMLSelectElement).value })}><option value="">选择项目</option>{#each snapshot.projects as project}<option value={project.path}>{project.name}</option>{/each}</select></label>
+            <SearchableSelect id="qwb-widget-fixed-project" label="固定项目" value={String(configSection(editingConfig, "source").projectPath ?? editingConfig.projectPath ?? "")} options={projectOptions()} emptyLabel="不固定项目" onSelect={(value) => updateEditingSource({ projectPath: value })} />
           {/if}
         {/if}
-        <label>客户筛选<select value={String(configSection(editingConfig, "source").clientPath ?? editingConfig.clientPath ?? "")} on:change={(event) => updateEditingSource({ clientPath: (event.currentTarget as HTMLSelectElement).value })}><option value="">全部客户</option>{#each snapshot.clients as client}<option value={client.path}>{client.name}</option>{/each}</select></label>
+        <SearchableSelect id="qwb-widget-client-filter" label="客户筛选" value={String(configSection(editingConfig, "source").clientPath ?? editingConfig.clientPath ?? "")} options={clientOptions()} emptyLabel="全部客户" onSelect={(value) => updateEditingSource({ clientPath: value })} />
         <label>项目类型<select value={String(configSection(editingConfig, "source").projectType ?? editingConfig.projectType ?? "")} on:change={(event) => updateEditingSource({ projectType: (event.currentTarget as HTMLSelectElement).value })}><option value="">全部类型</option>{#each focusProjectTypes() as projectType}<option value={projectType}>{projectType}</option>{/each}</select></label>
         {#if String(configSection(editingConfig, "source").kind ?? "tasks") === "clients"}
           <label>关系状态<select value={String(configSection(editingConfig, "query").relationshipStatus ?? "")} on:change={(event) => updateEditingQuery({ relationshipStatus: (event.currentTarget as HTMLSelectElement).value })}><option value="">全部关系状态</option>{#each clientRelationshipStatuses() as status}<option value={status}>{status}</option>{/each}</select></label>
@@ -2093,20 +2177,29 @@
       {#if !controller.settings.writesEnabled}
         <div class="qwb-inline-warning">写入尚未启用。请先在插件设置中阅读说明并确认。</div>
       {/if}
-      {#if dialog === "entity"}
+      {#if dialog === "note"}
+        <label>标题<input bind:value={noteTitle} placeholder="输入清晰、可检索的笔记标题" /></label>
+        <label>保存目录<input bind:value={noteFolder} list="qwb-note-folder-options" placeholder="留空则保存到库根目录" /></label>
+        <datalist id="qwb-note-folder-options">{#each noteFolderSuggestions() as folder}<option value={folder}></option>{/each}</datalist>
+        <SearchableSelect id="qwb-note-client" label="关联客户（可选）" bind:value={noteClient} options={clientOptions()} emptyLabel="暂不关联客户" />
+        <SearchableSelect id="qwb-note-project" label="关联项目（可选）" bind:value={noteProject} options={projectOptions()} emptyLabel="暂不关联项目" />
+        <label>正文（可选）<textarea bind:value={noteBody} rows="6" placeholder="记录背景、判断或下一步"></textarea></label>
+        <div class="qwb-inline-preview"><strong>写入预览</strong><div>{noteTargetPath()}</div><small>{noteClient ? `客户：${relationLabel(noteClient)}` : "未关联客户"} · {noteProject ? `项目：${relationLabel(noteProject)}` : "未关联项目"}</small></div>
+        <div class="qwb-modal-actions"><button class="qwb-button qwb-button-subtle" on:click={() => (dialog = null)}>取消</button><button class="qwb-button qwb-button-primary" disabled={!controller.settings.writesEnabled || !noteTitle.trim() || busy} on:click={submitNote}>确认创建</button></div>
+      {:else if dialog === "entity"}
         <label>类型<select bind:value={entityKind}><option value="project">项目</option><option value="client">客户</option><option value="meeting">会议</option><option value="supplier">供应商</option></select></label>
         <label>名称<input bind:value={entityName} placeholder="输入清晰、可检索的名称" /></label>
-        {#if entityKind === "project"}<label>关联客户<select bind:value={relatedClient}><option value="">暂不关联</option>{#each snapshot.clients as client}<option value={client.path}>{client.name}</option>{/each}</select></label><button class="qwb-text-action" type="button" on:click={() => beginNestedEntity("client")}>＋ 没有客户？先创建客户</button>{/if}
-        {#if entityKind === "meeting"}<label>关联项目<select bind:value={relatedProject}><option value="">暂不关联</option>{#each snapshot.projects as project}<option value={project.path}>{project.name}</option>{/each}</select></label><button class="qwb-text-action" type="button" on:click={() => beginNestedEntity("project")}>＋ 没有项目？先创建项目</button><label>日期<input type="date" bind:value={entityDate} /></label><div class="qwb-form-row"><label>开始时间<input type="time" bind:value={entityStartTime} /></label><label>结束时间<input type="time" min={entityStartTime || undefined} bind:value={entityEndTime} /></label></div>{/if}
+        {#if entityKind === "project"}<SearchableSelect id="qwb-entity-client" label="关联客户" bind:value={relatedClient} options={clientOptions()} emptyLabel="暂不关联客户" /><button class="qwb-text-action" type="button" on:click={() => beginNestedEntity("client")}>＋ 没有客户？先创建客户</button>{/if}
+        {#if entityKind === "meeting"}<SearchableSelect id="qwb-entity-project" label="关联项目" bind:value={relatedProject} options={projectOptions()} emptyLabel="暂不关联项目" /><button class="qwb-text-action" type="button" on:click={() => beginNestedEntity("project")}>＋ 没有项目？先创建项目</button><SearchableSelect id="qwb-meeting-client" label="关联客户（可选）" bind:value={relatedClient} options={clientOptions()} emptyLabel="暂不关联客户" /><label>日期<input type="date" bind:value={entityDate} /></label><div class="qwb-form-row"><label>开始时间<input type="time" bind:value={entityStartTime} /></label><label>结束时间<input type="time" min={entityStartTime || undefined} bind:value={entityEndTime} /></label></div>{/if}
         <div class="qwb-inline-preview"><strong>写入预览</strong><div>{entityTargetFolder()}/{entityKind === "meeting" && entityDate ? `${entityDate} ` : ""}{entityName || "未命名"}.md</div><small>确认后仍会执行模板、重名与路径预检。</small></div>
         <button class="qwb-text-action" type="button" disabled={!entityName.trim() || busy} on:click={() => run(previewEntityTemplate, "模板预览已生成")}>生成完整模板预览</button>
         {#if entityTemplatePreview}<pre class="qwb-template-preview">{entityTemplatePreview}</pre>{/if}
         <div class="qwb-modal-actions"><button class="qwb-button qwb-button-subtle" on:click={() => (dialog = null)}>取消</button><button class="qwb-button qwb-button-primary" disabled={!controller.settings.writesEnabled || !entityName.trim() || busy} on:click={submitEntity}>确认创建</button></div>
       {:else if dialog === "task"}
-        <label>项目<select bind:value={projectPath}><option value="">选择项目</option>{#each snapshot.projects as project}<option value={project.path}>{project.name}</option>{/each}</select></label>
+        <SearchableSelect id="qwb-task-project" label="项目" bind:value={projectPath} options={projectOptions()} emptyLabel="尚未选择项目" />
         <label>任务<textarea bind:value={taskText} rows="3" placeholder="描述下一步具体行动"></textarea></label>
         <div class="qwb-form-row"><label>截止日期<input type="date" bind:value={taskDue} /></label><label>优先级<select bind:value={taskPriority}><option value="highest">最高</option><option value="high">高</option><option value="normal">普通</option><option value="low">低</option><option value="lowest">最低</option></select></label></div>
-        <div class="qwb-inline-preview"><strong>写入预览</strong><div>{taskText || "未填写任务"}{taskDue ? ` · 截止 ${taskDue}` : ""}</div><small>{projectPath || "尚未选择项目"}</small></div>
+        <div class="qwb-inline-preview"><strong>写入预览</strong><div>{taskText || "未填写任务"}{taskDue ? ` · 截止 ${taskDue}` : ""}</div><small>{projectPath ? relationLabel(projectPath) : "尚未选择项目"}</small></div>
         <div class="qwb-modal-actions"><button class="qwb-button qwb-button-subtle" on:click={() => (dialog = null)}>取消</button>{#if controller.tasksIntegrationAvailable()}<button class="qwb-button" disabled={!controller.settings.writesEnabled || !projectPath || busy} on:click={submitTaskWithTasks}>Tasks 高级新建</button>{/if}<button class="qwb-button qwb-button-primary" disabled={!controller.settings.writesEnabled || !projectPath || !taskText.trim() || busy} on:click={submitTask}>添加任务</button></div>
       {:else if dialog === "task-edit"}
         {#if taskEditReason}<div class="qwb-inline-warning">{taskEditReason}</div>{/if}
@@ -2121,7 +2214,7 @@
       {:else if dialog === "migrate"}
         <p>预览：将 {migrationTasks.length} 条会议草稿迁移到同一目标项目或客户。每条行动都有独立回执；成功项写入稳定来源标记，重复执行不会重复创建。</p>
         <div class="qwb-inline-preview">{#each migrationTasks.slice(0, 8) as task}<div>• {task.text} <small>{task.sourceName}</small></div>{/each}</div>
-        <label>迁移目标<select bind:value={migrationTarget}><option value="">选择项目或客户</option><optgroup label="项目">{#each snapshot.projects as project}<option value={project.path}>{project.name}</option>{/each}</optgroup><optgroup label="客户">{#each snapshot.clients as client}<option value={client.path}>{client.name}</option>{/each}</optgroup></select></label>
+        <SearchableSelect id="qwb-migration-target" label="迁移目标" bind:value={migrationTarget} options={migrationOptions()} emptyLabel="尚未选择目标" placeholder="输入项目或客户名称" />
         {#if migrationBatch}
           <div class="qwb-migration-receipt" class:partial={migrationBatch.status !== "completed"}>
             <strong>批次 {migrationBatch.status === "completed" ? "已完成" : migrationBatch.status === "partial" ? "部分完成" : "失败"}</strong>
@@ -2133,7 +2226,7 @@
         <div class="qwb-modal-actions"><button class="qwb-button qwb-button-subtle" on:click={() => (dialog = null)}>关闭</button>{#if migrationBatch?.retryItems.length}<button class="qwb-button" disabled={busy} on:click={retryMigration}>继续恢复 {migrationBatch.retryItems.length} 条</button>{/if}<button class="qwb-button qwb-button-primary" disabled={!controller.settings.writesEnabled || !migrationTarget || busy || migrationBatch?.status === "completed"} on:click={submitMigration}>{migrationBatch ? "重新运行批次" : "预检并迁移"}</button></div>
       {:else if dialog === "knowledge"}
         <label>处理状态<select bind:value={knowledgeStatus}><option>待处理</option><option>待沉淀</option><option>待读</option><option>已归档</option><option>重复</option></select></label>
-        <label>关联项目<select bind:value={knowledgeProject}><option value="">暂不关联</option>{#each snapshot.projects as project}<option value={project.path}>{project.name}</option>{/each}</select></label>
+        <SearchableSelect id="qwb-knowledge-project" label="关联项目" bind:value={knowledgeProject} options={projectOptions()} emptyLabel="暂不关联项目" />
         <div class="qwb-inline-preview"><strong>状态处理</strong><small>只更新来源笔记的 triage_status 与项目关联，不改变现有模板。</small></div>
         <div class="qwb-modal-actions"><button class="qwb-button qwb-button-subtle" on:click={() => (dialog = null)}>取消</button><button class="qwb-button" disabled={!controller.settings.writesEnabled || busy} on:click={submitKnowledge}>仅保存状态</button></div>
         <hr />

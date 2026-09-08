@@ -96,6 +96,15 @@ export interface CreateEntityInput {
   openAfterCreate?: boolean;
 }
 
+export interface CreateNoteInput {
+  title: string;
+  folder?: string;
+  body?: string;
+  relatedClient?: string;
+  relatedProject?: string;
+  openAfterCreate?: boolean;
+}
+
 export interface AddProjectTaskInput {
   projectPath: string;
   text: string;
@@ -116,6 +125,8 @@ export interface WorkbenchController {
   authorizeCalendar(): Promise<void>;
   openContextPanel(): Promise<void>;
   createBlankNote(): Promise<void>;
+  createNote(input: CreateNoteInput): Promise<TransactionReceipt>;
+  previewNote(input: CreateNoteInput): Promise<{ path: string; content: string }>;
   setActivePath(path?: string, surface?: ContextSurface): Promise<void>;
   openPath(path: string): Promise<void>;
   createEntity(input: CreateEntityInput): Promise<TransactionReceipt>;
