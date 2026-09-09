@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { renderNoteMarkdown } from "../src/domain/note";
+import { DEFAULT_PROJECT_NOTE_FOLDER, renderNoteMarkdown } from "../src/domain/note";
 import { filterSearchableOptions } from "../src/ui/searchable-select";
 
 describe("workbench note form", () => {
@@ -11,6 +11,8 @@ describe("workbench note form", () => {
       relatedProject: "10_业务_Business/02_项目_Projects/项目甲.md"
     }, "2026-09-08");
 
+    expect(DEFAULT_PROJECT_NOTE_FOLDER).toBe("10_业务_Business/04_方案资产_SolutionAssets");
+    expect(content).toContain("type: 项目文件");
     expect(content).toContain("created: 2026-09-08");
     expect(content).toContain('client: "[[10_业务_Business/01_客户_Clients/客户甲]]"');
     expect(content).toContain('project: "[[10_业务_Business/02_项目_Projects/项目甲]]"');

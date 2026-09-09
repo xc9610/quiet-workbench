@@ -1476,6 +1476,200 @@
   box-shadow: var(--shadow-l);
 }
 
+.qwb-modal.qwb-note-modal {
+  width: min(620px, 100%);
+  padding: 0;
+  overflow: visible;
+  border-color: color-mix(in srgb, var(--interactive-accent) 20%, var(--qwb-border));
+}
+
+.qwb-note-modal > header {
+  margin: 0;
+  padding: 22px 24px 18px;
+  border-bottom: 1px solid var(--qwb-border);
+  background: linear-gradient(145deg, color-mix(in srgb, var(--interactive-accent) 8%, transparent), transparent 60%);
+}
+
+.qwb-note-modal > header p {
+  max-width: 48ch;
+  margin: 7px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.qwb-note-modal > header > button {
+  width: 36px;
+  min-width: 36px;
+  min-height: 36px;
+  border-radius: 9px;
+}
+
+.qwb-note-modal > header > button:hover,
+.qwb-note-modal > header > button:focus-visible {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.qwb-note-form {
+  max-height: min(680px, calc(90vh - 92px));
+  padding: 18px 24px 22px;
+  overflow-y: auto;
+}
+
+.qwb-note-section {
+  margin-bottom: 14px;
+  padding: 16px;
+  border: 1px solid var(--qwb-border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--background-secondary) 72%, transparent);
+}
+
+.qwb-note-section-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.qwb-note-section-heading h3 {
+  margin: 0;
+  color: var(--text-normal);
+  font-size: 14px;
+}
+
+.qwb-note-section-heading p {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.qwb-note-section-heading > span {
+  flex: none;
+  padding: 3px 7px;
+  border: 1px solid var(--qwb-border);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.qwb-note-section > label {
+  display: grid;
+  gap: 7px;
+  margin-bottom: 14px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.qwb-note-section > label:last-child {
+  margin-bottom: 0;
+}
+
+.qwb-note-section .searchable-field:last-child {
+  margin-bottom: 0;
+}
+
+.qwb-note-title-field input {
+  font-size: 14px;
+  font-weight: 550;
+}
+
+.qwb-note-section textarea {
+  min-height: 132px;
+  padding: 11px 12px;
+  line-height: 1.6;
+  resize: vertical;
+}
+
+.qwb-note-location {
+  margin-bottom: 14px;
+  border: 1px solid var(--qwb-border);
+  border-radius: 11px;
+  background: var(--background-primary-alt);
+}
+
+.qwb-note-location summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 50px;
+  padding: 9px 12px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.qwb-note-location summary::-webkit-details-marker { display: none; }
+
+.qwb-note-location summary > span {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.qwb-note-location summary strong {
+  color: var(--text-normal);
+  font-size: 12px;
+}
+
+.qwb-note-location summary small {
+  overflow-wrap: anywhere;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.qwb-note-location summary em {
+  color: var(--text-accent);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 600;
+}
+
+.qwb-note-location > label {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0 12px 12px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.qwb-note-receipt {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 3px 16px;
+  padding: 11px 13px;
+  border-left: 3px solid var(--interactive-accent);
+  border-radius: 0 9px 9px 0;
+  background: color-mix(in srgb, var(--interactive-accent) 7%, var(--background-secondary));
+}
+
+.qwb-note-receipt span,
+.qwb-note-receipt small {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.qwb-note-receipt strong {
+  grid-row: span 2;
+  align-self: center;
+  max-width: 250px;
+  overflow: hidden;
+  color: var(--text-normal);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qwb-note-form .qwb-modal-actions {
+  margin-top: 16px;
+}
+
 .qwb-modal > header {
   display: flex;
   align-items: flex-start;
@@ -1762,6 +1956,30 @@
   .qwb-form-row {
     grid-template-columns: 1fr;
     gap: 0;
+  }
+
+  .qwb-modal-backdrop { padding: 10px; }
+
+  .qwb-modal.qwb-note-modal {
+    max-height: 94vh;
+    overflow: hidden;
+  }
+
+  .qwb-note-modal > header { padding: 18px; }
+
+  .qwb-note-form {
+    max-height: calc(94vh - 88px);
+    padding: 14px 16px 18px;
+  }
+
+  .qwb-note-section { padding: 14px; }
+
+  .qwb-note-receipt { grid-template-columns: 1fr; }
+
+  .qwb-note-receipt strong {
+    grid-row: auto;
+    max-width: none;
+    white-space: normal;
   }
 
   .qwb-focus-row {

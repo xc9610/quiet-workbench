@@ -80,12 +80,13 @@
   import LayoutEditorBar from "../ui/LayoutEditorBar.svelte";
   import SearchableSelect from "../ui/SearchableSelect.svelte";
   import type { SearchableOption } from "../ui/searchable-select";
+  import { DEFAULT_PROJECT_NOTE_FOLDER } from "../domain/note";
 
   export let controller: WorkbenchController;
 
   type DialogKind = "note" | "entity" | "task" | "task-edit" | "schedule" | "migrate" | "knowledge" | "yolo-preview" | null;
-  const UI_VERSION = "0.8.10";
-  const DEFAULT_NOTE_FOLDER = "10_业务_Business/90_待整理_Inbox";
+  const UI_VERSION = "0.8.11";
+  const DEFAULT_NOTE_FOLDER = DEFAULT_PROJECT_NOTE_FOLDER;
 
   interface EntityDraft {
     kind: Exclude<EntityKind, "knowledge">;
@@ -113,6 +114,7 @@
   let noteBody = "";
   let noteClient = "";
   let noteProject = "";
+  let noteTitleInput: HTMLInputElement;
   let entityKind: Exclude<EntityKind, "knowledge"> = "project";
   let entityName = "";
   let relatedClient = "";
@@ -1082,7 +1084,7 @@
 
   function dialogTitle(kind: DialogKind): string {
     if (!kind) return "工作流";
-    return { note: "新建笔记", entity: "新建条目", task: "添加项目任务", "task-edit": "调整任务", schedule: "安排到日程", migrate: "迁移会议行动项", knowledge: "处理知识", "yolo-preview": "YOLO 处理预览" }[kind];
+    return { note: "新建项目笔记", entity: "新建条目", task: "添加项目任务", "task-edit": "调整任务", schedule: "安排到日程", migrate: "迁移会议行动项", knowledge: "处理知识", "yolo-preview": "YOLO 处理预览" }[kind];
   }
 
   function entityTargetFolder(): string {
@@ -1098,10 +1100,16 @@
     return rows.map((entry) => ({
       value: entry.path,
       label: entry.name,
-      description: [kindLabel, entry.status || entry.phase, entry.path].filter(Boolean).join(" · "),
-      keywords: [entry.client, entry.project, entry.projectType, entry.organizationType, entry.relationshipStatus]
+      description: [kindLabel, entry.status || entry.phase, compactRelationName(entry.client || entry.project)]
+        .filter(Boolean)
+        .join(" · "),
+      keywords: [entry.path, entry.client, entry.project, entry.projectType, entry.organizationType, entry.relationshipStatus]
         .filter((value): value is string => Boolean(value))
     }));
+  }
+
+  function compactRelationName(value?: string): string {
+    return value?.replace(/^\[\[/u, "").replace(/\]\]$/u, "").replace(/\.md$/iu, "").split("/").pop() ?? "";
   }
 
   function clientOptions(): SearchableOption[] {
@@ -1264,6 +1272,7 @@
     noteClient = "";
     noteProject = "";
     dialog = "note";
+    void tick().then(() => noteTitleInput?.focus());
   }
 
   function beginNestedEntity(kind: "client" | "project"): void {
@@ -2172,20 +2181,34 @@
 
 {#if dialog}
   <div class="qwb-modal-backdrop" role="presentation" on:click={(event) => event.currentTarget === event.target && (dialog = null)}>
-    <div class="qwb-modal" role="dialog" aria-modal="true" aria-labelledby="qwb-dialog-title">
-      <header><div><span class="qwb-eyebrow">SAFE WORKFLOW</span><h2 id="qwb-dialog-title">{dialogTitle(dialog)}</h2></div><button aria-label="关闭" on:click={() => (dialog = null)}>×</button></header>
+    <div class="qwb-modal" class:qwb-note-modal={dialog === "note"} role="dialog" aria-modal="true" aria-labelledby="qwb-dialog-title">
+      <header><div><span class="qwb-eyebrow">{dialog === "note" ? "PROJECT NOTE" : "SAFE WORKFLOW"}</span><h2 id="qwb-dialog-title">{dialogTitle(dialog)}</h2>{#if dialog === "note"}<p>把方案过程、关键判断和下一步沉淀到项目上下文中。</p>{/if}</div><button aria-label="关闭" on:click={() => (dialog = null)}>×</button></header>
       {#if !controller.settings.writesEnabled}
         <div class="qwb-inline-warning">写入尚未启用。请先在插件设置中阅读说明并确认。</div>
       {/if}
       {#if dialog === "note"}
-        <label>标题<input bind:value={noteTitle} placeholder="输入清晰、可检索的笔记标题" /></label>
-        <label>保存目录<input bind:value={noteFolder} list="qwb-note-folder-options" placeholder="留空则保存到库根目录" /></label>
-        <datalist id="qwb-note-folder-options">{#each noteFolderSuggestions() as folder}<option value={folder}></option>{/each}</datalist>
-        <SearchableSelect id="qwb-note-client" label="关联客户（可选）" bind:value={noteClient} options={clientOptions()} emptyLabel="暂不关联客户" />
-        <SearchableSelect id="qwb-note-project" label="关联项目（可选）" bind:value={noteProject} options={projectOptions()} emptyLabel="暂不关联项目" />
-        <label>正文（可选）<textarea bind:value={noteBody} rows="6" placeholder="记录背景、判断或下一步"></textarea></label>
-        <div class="qwb-inline-preview"><strong>写入预览</strong><div>{noteTargetPath()}</div><small>{noteClient ? `客户：${relationLabel(noteClient)}` : "未关联客户"} · {noteProject ? `项目：${relationLabel(noteProject)}` : "未关联项目"}</small></div>
-        <div class="qwb-modal-actions"><button class="qwb-button qwb-button-subtle" on:click={() => (dialog = null)}>取消</button><button class="qwb-button qwb-button-primary" disabled={!controller.settings.writesEnabled || !noteTitle.trim() || busy} on:click={submitNote}>确认创建</button></div>
+        <form class="qwb-note-form" on:submit|preventDefault={submitNote}>
+          <section class="qwb-note-section">
+            <div class="qwb-note-section-heading"><div><h3>笔记内容</h3><p>标题用于检索，正文可以先记录最小必要信息。</p></div><span>必填</span></div>
+            <label class="qwb-note-title-field">标题<input bind:this={noteTitleInput} bind:value={noteTitle} placeholder="例如：XX 项目热控方案讨论" /></label>
+            <label>正文（可选）<textarea bind:value={noteBody} rows="7" placeholder="记录背景、判断、结论或下一步……"></textarea></label>
+          </section>
+
+          <section class="qwb-note-section">
+            <div class="qwb-note-section-heading"><div><h3>关联对象</h3><p>优先关联项目；客户用于补充业务上下文。</p></div><span>可选</span></div>
+            <SearchableSelect id="qwb-note-project" label="关联项目（推荐）" bind:value={noteProject} options={projectOptions()} emptyLabel="暂不关联项目" help="可按项目名称、客户、状态或路径搜索。" />
+            <SearchableSelect id="qwb-note-client" label="关联客户" bind:value={noteClient} options={clientOptions()} emptyLabel="暂不关联客户" help="项目已经明确时，客户可以留空。" />
+          </section>
+
+          <details class="qwb-note-location">
+            <summary><span><strong>保存位置</strong><small>{noteTargetPath()}</small></span><em>调整</em></summary>
+            <label>目录<input bind:value={noteFolder} list="qwb-note-folder-options" placeholder="留空则保存到库根目录" /></label>
+            <datalist id="qwb-note-folder-options">{#each noteFolderSuggestions() as folder}<option value={folder}></option>{/each}</datalist>
+          </details>
+
+          <div class="qwb-note-receipt" aria-live="polite"><span>写入后将自动打开</span><strong>{noteProject ? relationLabel(noteProject) : "未关联项目"}</strong><small>{noteClient ? `客户：${relationLabel(noteClient)}` : "客户：未关联"}</small></div>
+          <div class="qwb-modal-actions"><button type="button" class="qwb-button qwb-button-subtle" on:click={() => (dialog = null)}>取消</button><button type="submit" class="qwb-button qwb-button-primary" disabled={!controller.settings.writesEnabled || !noteTitle.trim() || busy}>{busy ? "创建中…" : "创建项目笔记"}</button></div>
+        </form>
       {:else if dialog === "entity"}
         <label>类型<select bind:value={entityKind}><option value="project">项目</option><option value="client">客户</option><option value="meeting">会议</option><option value="supplier">供应商</option></select></label>
         <label>名称<input bind:value={entityName} placeholder="输入清晰、可检索的名称" /></label>
