@@ -10,6 +10,9 @@
     WorkbenchController,
     WorkbenchSnapshot
   } from "../ui/controller";
+  import { projectStatusLabel } from "../domain/project-status";
+  import { reviewTaskTitle } from "../domain/project-review";
+  let focusExpanded = false;
   import { EMPTY_SNAPSHOT } from "../ui/controller";
   import { formatDate } from "../services/template-service";
   import type { MeetingMigrationBatchResult } from "../services/meeting-migration-service";
@@ -85,7 +88,7 @@
   export let controller: WorkbenchController;
 
   type DialogKind = "note" | "entity" | "task" | "task-edit" | "schedule" | "migrate" | "knowledge" | "yolo-preview" | null;
-  const UI_VERSION = "0.8.12";
+  const UI_VERSION = "0.8.13";
   const DEFAULT_NOTE_FOLDER = controller.settings.solutionAssetsFolder || DEFAULT_PROJECT_NOTE_FOLDER;
 
   interface EntityDraft {
@@ -238,7 +241,7 @@
     return new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", weekday: "long" }).format(new Date());
   }
 
-  function focusFiltersVisible(item: LayoutItem): boolean {
+  $: focusFiltersVisible =(item: LayoutItem): boolean => {
     return focusFilterInstances.includes(itemKey(item));
   }
 
@@ -261,6 +264,7 @@
   }
 
   function handleDocumentKeydown(event: KeyboardEvent): void {
+    if (dialog) return;
     if (event.key !== "Escape") return;
     if (showClientPicker) showClientPicker = false;
     else if (focusFilterInstances.length) closeFocusFilters();
@@ -286,7 +290,7 @@
     focusFilterStates = { ...focusFilterStates, [cacheKey]: configuredFocusFilters(item) };
   }
 
-  function focusFiltersForItem(item?: LayoutItem): FocusFilters {
+  $: focusFiltersForItem =(item?: LayoutItem): FocusFilters => {
     if (!item) return structuredClone(DEFAULT_FOCUS_FILTERS);
     return focusFilterStates[focusFilterCacheKey(item)] ?? configuredFocusFilters(item);
   }
@@ -311,7 +315,7 @@
     return filters;
   }
 
-  function focusFilterCacheKey(item: LayoutItem): string {
+  $: focusFilterCacheKey =(item: LayoutItem): string => {
     return `${activeScene}:${itemKey(item)}`;
   }
 
@@ -371,7 +375,7 @@
     if (item) await persistFocusFilters(item, { ...focusFiltersForItem(item), clients: [...draftClients] });
   }
 
-  function clientSearchResults() {
+  $: clientSearchResults =() => {
     const query = clientSearch.trim().toLocaleLowerCase("zh-CN");
     return snapshot.clients
       .filter((client) => !query || [client.name, client.path, ...(client.aliases ?? [])].some((value) => value.toLocaleLowerCase("zh-CN").includes(query)))
@@ -394,7 +398,7 @@
     }
   }
 
-  function focusProjectTypes(): string[] {
+  $: focusProjectTypes =(): string[] => {
     return [...new Set(snapshot.projects.map((project) => project.projectType).filter((value): value is string => Boolean(value)))].sort((left, right) => left.localeCompare(right, "zh-CN"));
   }
 
@@ -402,11 +406,11 @@
     return resolveEntityReference(value, entities)?.path;
   }
 
-  function resolveProject(value?: string) {
+  $: resolveProject =(value?: string) => {
     return resolveEntityReference(value, snapshot.projects);
   }
 
-  function taskClientPaths(task: TaskRecord): string[] {
+  $: taskClientPaths =(task: TaskRecord): string[] => {
     if (task.scope === "client") return [task.path];
     const sourceProject = task.scope === "project" ? snapshot.projects.find((project) => project.path === task.path) : undefined;
     const sourceMeeting = task.scope === "meeting-draft" ? snapshot.meetings.find((meeting) => meeting.path === task.path) : undefined;
@@ -420,7 +424,7 @@
     return links.length ? links : value.split(/[、,，;]/u).map((entry) => entry.trim()).filter(Boolean);
   }
 
-  function focusTaskRecords(): FocusTaskRecord[] {
+  $: focusTaskRecords =(): FocusTaskRecord[] => {
     return snapshot.tasks
       .filter((task) => !task.migrated)
       .filter((task) => task.scope !== "project" || snapshot.projects.some((project) => project.path === task.path))
@@ -434,8 +438,8 @@
       });
   }
 
-  function visibleFocusTasks(item: LayoutItem): FocusTaskRecord[] {
-    return filterFocusTasks(focusTaskRecords(), focusFiltersForItem(item), formatDate(new Date(), "YYYY-MM-DD")).slice(0, 50);
+  $: visibleFocusTasks =(item: LayoutItem): FocusTaskRecord[] => {
+    return filterFocusTasks(focusTaskRecords(), focusFiltersForItem(item), formatDate(new Date(), "YYYY-MM-DD"));
   }
 
   function focusDate(task: TaskRecord): string {
@@ -454,7 +458,7 @@
   }
 
   async function openFocusYolo(item: LayoutItem): Promise<void> {
-    const rows = visibleFocusTasks(item);
+    const rows = visibleFocusTasks(item).slice(0, focusExpanded ? undefined : 50);
     const prompt = [
       "请协助我处理以下 Asterism 今日焦点。先分析和给出编号建议，不要直接修改文件：",
       ...rows.map((task, index) => `${index + 1}. [${scopeLabel(task.scope)}] ${task.text}（${focusDate(task)}，来源：${task.sourceName}）`)
@@ -518,7 +522,7 @@
     }[id] ?? "asterism-mark";
   }
 
-  function heroStatusIcon(): string {
+  $: heroStatusIcon =(): string => {
     if (heroStatus.tone === "error") return "alert-triangle";
     if (heroStatus.tone === "enabled") return "check";
     return "eye";
@@ -604,7 +608,7 @@
     editingWidget = undefined;
   }
 
-  function editingTaskScopes(): string[] {
+  $: editingTaskScopes =(): string[] => {
     const source = configSection(editingConfig, "source");
     const value = source.taskScopes ?? editingConfig.taskScopes;
     return Array.isArray(value) ? value.map(String) : [];
@@ -676,12 +680,12 @@
     return configString(item, "metric");
   }
 
-  function contextProjectPath(): string {
+  $: contextProjectPath =(): string => {
     if (snapshot.context.kind === "project" && snapshot.context.path) return snapshot.context.path;
     return snapshot.context.relatedProjects[0]?.path ?? "";
   }
 
-  function scopedProjectPath(item: LayoutItem): string {
+  $: scopedProjectPath =(item: LayoutItem): string => {
     const mode = scopeMode(item);
     if (mode === "fixed") return configString(item, "projectPath");
     if (mode === "context") return contextProjectPath();
@@ -689,11 +693,11 @@
     return "";
   }
 
-  function contextClientPath(): string {
+  $: contextClientPath =(): string => {
     return snapshot.context.kind === "client" && snapshot.context.path ? snapshot.context.path : "";
   }
 
-  function scopedClientPath(item: LayoutItem): string {
+  $: scopedClientPath =(item: LayoutItem): string => {
     const mode = scopeMode(item);
     if (mode === "fixed") return configString(item, "clientPath");
     if (mode === "context") return contextClientPath();
@@ -701,7 +705,7 @@
     return configString(item, "clientPath");
   }
 
-  function scopedClients(item: LayoutItem) {
+  $: scopedClients =(item: LayoutItem) => {
     const clientPath = scopedClientPath(item);
     const relationshipStatus = configString(item, "relationshipStatus");
     const organizationType = configString(item, "organizationType");
@@ -714,21 +718,21 @@
       .slice(0, configLimit(item));
   }
 
-  function selectedClient(item: LayoutItem) {
+  $: selectedClient =(item: LayoutItem) => {
     const path = scopedClientPath(item);
     if (scopeMode(item) !== "all" && !path) return undefined;
     return snapshot.clients.find((client) => client.path === path) ?? scopedClients(item)[0];
   }
 
-  function sharedClient() {
+  $: sharedClient =() => {
     return snapshot.clients.find((client) => client.path === sharedClientPath);
   }
 
-  function contextMeetingPath(): string {
+  $: contextMeetingPath =(): string => {
     return snapshot.context.kind === "meeting" && snapshot.context.path ? snapshot.context.path : "";
   }
 
-  function scopedMeetingPath(item: LayoutItem): string {
+  $: scopedMeetingPath =(item: LayoutItem): string => {
     const mode = scopeMode(item);
     if (mode === "fixed") return configString(item, "meetingPath");
     if (mode === "context") return contextMeetingPath();
@@ -736,7 +740,7 @@
     return configString(item, "meetingPath");
   }
 
-  function scopedMeetings(item: LayoutItem) {
+  $: scopedMeetings =(item: LayoutItem) => {
     const path = scopedMeetingPath(item);
     const query = (widgetSearch[itemKey(item)] ?? configString(item, "search")).trim().toLocaleLowerCase("zh-CN");
     return snapshot.meetings
@@ -746,12 +750,12 @@
       .slice(0, configLimit(item));
   }
 
-  function selectedMeeting(item: LayoutItem) {
+  $: selectedMeeting =(item: LayoutItem) => {
     const path = scopedMeetingPath(item);
     return snapshot.meetings.find((meeting) => meeting.path === path) ?? scopedMeetings(item)[0];
   }
 
-  function scopedSupplierPath(item: LayoutItem): string {
+  $: scopedSupplierPath =(item: LayoutItem): string => {
     const mode = scopeMode(item);
     if (mode === "fixed") return configString(item, "supplierPath");
     if (mode === "context" && snapshot.context.kind === "supplier") return snapshot.context.path ?? "";
@@ -759,7 +763,7 @@
     return configString(item, "supplierPath");
   }
 
-  function scopedSuppliers(item: LayoutItem) {
+  $: scopedSuppliers =(item: LayoutItem) => {
     const path = scopedSupplierPath(item);
     const query = (widgetSearch[itemKey(item)] ?? configString(item, "search")).trim().toLocaleLowerCase("zh-CN");
     return snapshot.suppliers
@@ -768,18 +772,18 @@
       .slice(0, configLimit(item));
   }
 
-  function selectedSupplier(item: LayoutItem) {
+  $: selectedSupplier =(item: LayoutItem) => {
     const path = scopedSupplierPath(item);
     return snapshot.suppliers.find((supplier) => supplier.path === path) ?? scopedSuppliers(item)[0];
   }
 
-  function projectForTask(task: TaskRecord) {
+  $: projectForTask =(task: TaskRecord) => {
     if (task.scope === "project") return snapshot.projects.find((project) => project.path === task.path);
     if (task.scope === "meeting-draft") return resolveProject(snapshot.meetings.find((meeting) => meeting.path === task.path)?.project);
     return undefined;
   }
 
-  function scopedProjects(item: LayoutItem) {
+  $: scopedProjects =(item: LayoutItem) => {
     const clientMode = queryMode(item) === "client-projects";
     const fixedPath = clientMode ? "" : scopedProjectPath(item);
     const clientPath = clientMode ? scopedClientPath(item) : configString(item, "clientPath");
@@ -795,7 +799,7 @@
       .slice(0, configLimit(item));
   }
 
-  function scopedTasks(item: LayoutItem, applyLimit = true): TaskRecord[] {
+  $: scopedTasks =(item: LayoutItem, applyLimit = true): TaskRecord[] => {
     const clientMode = queryMode(item) === "client-actions";
     const projectPath = clientMode ? "" : scopedProjectPath(item);
     const clientPath = clientMode ? scopedClientPath(item) : configString(item, "clientPath");
@@ -814,20 +818,20 @@
     return applyLimit ? rows.slice(0, configLimit(item)) : rows;
   }
 
-  function selectedProject(item: LayoutItem) {
+  $: selectedProject =(item: LayoutItem) => {
     return scopedProjects(item)[0] ?? snapshot.projects.find((project) => project.path === scopedProjectPath(item));
   }
 
-  function sharedProject() {
+  $: sharedProject =() => {
     return snapshot.projects.find((project) => project.path === sharedProjectPath);
   }
 
-  function projectClient(project: WorkbenchSnapshot["projects"][number]) {
+  $: projectClient =(project: WorkbenchSnapshot["projects"][number]) => {
     const path = resolveEntityPath(project.client, snapshot.clients);
     return path ? snapshot.clients.find((client) => client.path === path) : undefined;
   }
 
-  function projectClientLabel(project: WorkbenchSnapshot["projects"][number]): string {
+  $: projectClientLabel =(project: WorkbenchSnapshot["projects"][number]): string => {
     return projectClient(project)?.name ?? project.client?.replace(/^\[\[|\]\]$/gu, "").split("|").at(-1) ?? "未关联客户";
   }
 
@@ -835,33 +839,33 @@
     return project.updatedAt ? new Date(project.updatedAt).toLocaleDateString("zh-CN") : "未知";
   }
 
-  function tasksForProject(path: string, includeCompleted = true): TaskRecord[] {
+  $: tasksForProject =(path: string, includeCompleted = true): TaskRecord[] => {
     return snapshot.tasks.filter((task) => projectForTask(task)?.path === path && (includeCompleted || !task.completed));
   }
 
-  function meetingProjectPath(meetingPath: string): string | undefined {
+  $: meetingProjectPath =(meetingPath: string): string | undefined => {
     return resolveProject(snapshot.meetings.find((meeting) => meeting.path === meetingPath)?.project)?.path;
   }
 
-  function meetingsForProject(path: string) {
+  $: meetingsForProject =(path: string) => {
     return snapshot.meetings.filter((meeting) => resolveProject(meeting.project)?.path === path);
   }
 
-  function projectsForClient(path: string) {
+  $: projectsForClient =(path: string) => {
     return snapshot.projects.filter((project) => resolveEntityPath(project.client, snapshot.clients) === path);
   }
 
-  function tasksForClient(path: string): TaskRecord[] {
+  $: tasksForClient =(path: string): TaskRecord[] => {
     const projectPaths = new Set(projectsForClient(path).map((project) => project.path));
     return snapshot.tasks.filter((task) => !task.completed && !task.migrated && (task.path === path || Boolean(projectForTask(task) && projectPaths.has(projectForTask(task)!.path))));
   }
 
-  function meetingsForClient(path: string) {
+  $: meetingsForClient =(path: string) => {
     const projectPaths = new Set(projectsForClient(path).map((project) => project.path));
     return snapshot.meetings.filter((meeting) => resolveEntityPath(meeting.client, snapshot.clients) === path || Boolean(resolveProject(meeting.project) && projectPaths.has(resolveProject(meeting.project)!.path)));
   }
 
-  function clientRowsForWidget(item: LayoutItem) {
+  $: clientRowsForWidget =(item: LayoutItem) => {
     let rows = [...scopedClients(item)];
     if (queryMode(item) === "followups") {
       const { today, end } = dayRange(7);
@@ -872,7 +876,7 @@
     return rows;
   }
 
-  function clientStatusGroups(item: LayoutItem): Array<[string, WorkbenchSnapshot["clients"]]> {
+  $: clientStatusGroups =(item: LayoutItem): Array<[string, WorkbenchSnapshot["clients"]]> => {
     const groups = new Map<string, WorkbenchSnapshot["clients"]>();
     for (const client of scopedClients(item)) {
       const status = client.relationshipStatus || "未设置";
@@ -889,11 +893,11 @@
     return `${prefix} · ${client.followupDate}`;
   }
 
-  function clientRelationshipStatuses(): string[] {
+  $: clientRelationshipStatuses =(): string[] => {
     return [...new Set(snapshot.clients.map((client) => client.relationshipStatus).filter((value): value is string => Boolean(value)))].sort((left, right) => left.localeCompare(right, "zh-CN"));
   }
 
-  function clientOrganizationTypes(): string[] {
+  $: clientOrganizationTypes =(): string[] => {
     return [...new Set(snapshot.clients.map((client) => client.organizationType).filter((value): value is string => Boolean(value)))].sort((left, right) => left.localeCompare(right, "zh-CN"));
   }
 
@@ -902,17 +906,17 @@
     return { today, end: dateAfter(today, days) };
   }
 
-  function tasksInBucket(item: LayoutItem, bucket: TaskTimeBucket): TaskRecord[] {
+  $: tasksInBucket =(item: LayoutItem, bucket: TaskTimeBucket): TaskRecord[] => {
     const { today, end } = dayRange(7);
     return scopedTasks(item).filter((task) => taskTimeBucket(task, today, end) === bucket);
   }
 
-  function tasksInQuadrant(item: LayoutItem, quadrant: TaskQuadrant): TaskRecord[] {
+  $: tasksInQuadrant =(item: LayoutItem, quadrant: TaskQuadrant): TaskRecord[] => {
     const { today } = dayRange(0);
     return scopedTasks(item).filter((task) => taskQuadrant(task, today, dateAfter(today, 2)) === quadrant);
   }
 
-  function groupTasksByDate(item: LayoutItem): Array<[string, TaskRecord[]]> {
+  $: groupTasksByDate =(item: LayoutItem): Array<[string, TaskRecord[]]> => {
     const groups = new Map<string, TaskRecord[]>();
     for (const task of scopedTasks(item)) {
       const date = effectiveTaskDate(task) ?? "未安排";
@@ -950,7 +954,7 @@
     setCalendarDate(item, formatDate(new Date(), "YYYY-MM-DD"));
   }
 
-  function calendarEntries(item: LayoutItem): CalendarEntry[] {
+  $: calendarEntries =(item: LayoutItem): CalendarEntry[] => {
     const today = formatDate(new Date(), "YYYY-MM-DD");
     const source = dataSource(item);
     const meetings = scopedMeetings(item);
@@ -964,11 +968,11 @@
     return item.presetId === "schedule.overview" || dataSource(item) === "mixed";
   }
 
-  function scheduleAgendaGroups(item: LayoutItem): CalendarAgendaGroup[] {
+  $: scheduleAgendaGroups =(item: LayoutItem): CalendarAgendaGroup[] => {
     return groupScheduleAgenda(calendarEntries(item), formatDate(new Date(), "YYYY-MM-DD"), 7);
   }
 
-  function calendarEntriesForDate(item: LayoutItem, date: string): CalendarEntry[] {
+  $: calendarEntriesForDate =(item: LayoutItem, date: string): CalendarEntry[] => {
     return calendarEntries(item).filter((entry) => entry.date === date);
   }
 
@@ -992,14 +996,14 @@
     await controller.openCalendar();
   }
 
-  function calendarIntegrationTitle(): string {
+  $: calendarIntegrationTitle =(): string => {
     if (snapshot.calendar.state === "ready") return "打开 Full Calendar";
     if (snapshot.calendar.state === "authorization-required") return "连接 Full Calendar";
     if (snapshot.calendar.state === "unavailable") return "Full Calendar 未启用";
     return "重新连接 Full Calendar";
   }
 
-  function taskRowsForWidget(item: LayoutItem): TaskRecord[] {
+  $: taskRowsForWidget =(item: LayoutItem): TaskRecord[] => {
     const rows = scopedTasks(item, false);
     const { today, end } = dayRange(7);
     const configuredMode = queryMode(item);
@@ -1011,28 +1015,28 @@
     return taskListRows(rows, mode, today, end, configLimit(item));
   }
 
-  function projectRowsForWidget(item: LayoutItem) {
+  $: projectRowsForWidget =(item: LayoutItem) => {
     const mode = queryMode(item);
     let rows = [...scopedProjects(item)];
     if (mode === "risks") rows = rows.filter((project) => projectHealth(project).level !== "healthy");
-    if (mode === "milestones") rows = rows.filter((project) => project.due).sort((left, right) => (left.due ?? "").localeCompare(right.due ?? ""));
+    if (mode === "milestones") rows = rows.filter((project) => nextProjectTaskDate(project.path)).sort((left, right) => nextProjectTaskDate(left.path).localeCompare(nextProjectTaskDate(right.path)));
     if (mode === "recent") rows.sort((left, right) => (right.updatedAt ?? 0) - (left.updatedAt ?? 0));
     return rows;
   }
 
-  function projectTaskGroups(item: LayoutItem): Array<[WorkbenchSnapshot["projects"][number], TaskRecord[]]> {
+  $: projectTaskGroups =(item: LayoutItem): Array<[WorkbenchSnapshot["projects"][number], TaskRecord[]]> => {
     return scopedProjects(item)
       .map((project) => [project, tasksForProject(project.path, configBoolean(item, "includeCompleted"))] as [WorkbenchSnapshot["projects"][number], TaskRecord[]])
       .filter(([, tasks]) => tasks.length > 0);
   }
 
-  function clientTaskGroups(item: LayoutItem): Array<[WorkbenchSnapshot["clients"][number], TaskRecord[]]> {
+  $: clientTaskGroups =(item: LayoutItem): Array<[WorkbenchSnapshot["clients"][number], TaskRecord[]]> => {
     return snapshot.clients
       .map((client) => [client, scopedTasks(item).filter((task) => taskClientPaths(task).includes(client.path))] as [WorkbenchSnapshot["clients"][number], TaskRecord[]])
       .filter(([, tasks]) => tasks.length > 0);
   }
 
-  function workloadDays(item: LayoutItem): Array<{ date: string; count: number; width: number }> {
+  $: workloadDays =(item: LayoutItem): Array<{ date: string; count: number; width: number }> => {
     const { today } = dayRange(0);
     const counts = Array.from({ length: 7 }, (_, index) => {
       const date = dateAfter(today, index);
@@ -1042,32 +1046,37 @@
     return counts.map((entry) => ({ ...entry, width: Math.round((entry.count / max) * 100) }));
   }
 
-  function activityCalendar() {
+  $: activityCalendar =() => {
     return buildActivityCalendar(snapshot.activity);
   }
 
-  function activitySummary() {
+  $: activitySummary =() => {
     return activityStats(snapshot.activity);
   }
 
-  function relatedKnowledge(projectPath: string) {
+  $: relatedKnowledge =(projectPath: string) => {
     const project = snapshot.projects.find((entry) => entry.path === projectPath);
     if (!project) return [];
     return snapshot.knowledge.filter((entry) => resolveProject(entry.related)?.path === projectPath || entry.related?.includes(project.name));
   }
 
-  function projectHealth(project: WorkbenchSnapshot["projects"][number]) {
-    return calculateProjectHealth(project, tasksForProject(project.path), formatDate(new Date(), "YYYY-MM-DD"));
+  $: projectHealth =(project: WorkbenchSnapshot["projects"][number]) => {
+    return calculateProjectHealth({ ...project, due: undefined }, tasksForProject(project.path), formatDate(new Date(), "YYYY-MM-DD"));
+  }
+
+  $: nextProjectTaskDate =(path: string): string => {
+    return tasksForProject(path).filter((task) => !task.completed)
+      .map((task) => effectiveTaskDate(task)).filter((date): date is string => Boolean(date)).sort()[0] ?? "";
   }
 
   function healthLabel(level: ReturnType<typeof projectHealth>["level"]): string {
     return { healthy: "健康", attention: "需关注", risk: "有风险", unknown: "信息不足" }[level];
   }
 
-  function projectStatusGroups(item: LayoutItem): Array<[string, WorkbenchSnapshot["projects"]]> {
+  $: projectStatusGroups =(item: LayoutItem): Array<[string, WorkbenchSnapshot["projects"]]> => {
     const groups = new Map<string, WorkbenchSnapshot["projects"]>();
     for (const project of scopedProjects(item)) {
-      const status = project.status || project.phase || "未设置";
+      const status = projectStatusLabel(project.status);
       groups.set(status, [...(groups.get(status) ?? []), project]);
     }
     return [...groups.entries()];
@@ -1087,7 +1096,7 @@
     return { note: "新建项目笔记", entity: "新建条目", task: "添加项目任务", "task-edit": "调整任务", schedule: "安排到日程", migrate: "迁移会议行动项", knowledge: "处理知识", "yolo-preview": "YOLO 处理预览" }[kind];
   }
 
-  function entityTargetFolder(): string {
+  $: entityTargetFolder =(): string => {
     return {
       project: controller.settings.projectFolder,
       client: controller.settings.clientFolder,
@@ -1112,32 +1121,32 @@
     return value?.replace(/^\[\[/u, "").replace(/\]\]$/u, "").replace(/\.md$/iu, "").split("/").pop() ?? "";
   }
 
-  function clientOptions(): SearchableOption[] {
+  $: clientOptions =(): SearchableOption[] => {
     return relationOptions(snapshot.clients, "客户");
   }
 
-  function projectOptions(): SearchableOption[] {
+  $: projectOptions =(): SearchableOption[] => {
     return relationOptions(snapshot.projects, "项目");
   }
 
-  function meetingOptions(): SearchableOption[] {
+  $: meetingOptions =(): SearchableOption[] => {
     return relationOptions(snapshot.meetings, "会议");
   }
 
-  function supplierOptions(): SearchableOption[] {
+  $: supplierOptions =(): SearchableOption[] => {
     return relationOptions(snapshot.suppliers, "供应商");
   }
 
-  function migrationOptions(): SearchableOption[] {
+  $: migrationOptions =(): SearchableOption[] => {
     return [...projectOptions(), ...clientOptions()];
   }
 
-  function relationLabel(path: string): string {
+  $: relationLabel =(path: string): string => {
     return [...snapshot.projects, ...snapshot.clients, ...snapshot.meetings, ...snapshot.suppliers]
       .find((entry) => entry.path === path)?.name ?? path;
   }
 
-  function noteTargetPath(): string {
+  $: noteTargetPath =(): string => {
     const folder = noteFolder.trim().replace(/\/+$/u, "");
     return `${folder ? `${folder}/` : ""}${noteTitle.trim() || "未命名"}.md`;
   }
@@ -1168,7 +1177,7 @@
     return !pack || controller.settings.enabledPacks[pack] !== false;
   }
 
-  function itemStyle(item: LayoutItem): string {
+  $: itemStyle =(item: LayoutItem): string => {
     if (!isDesktop) return "";
     const cols = itemCols(item, gridColumnCount);
     const rows = item.collapsed ? 1 : itemRows(item);
@@ -1238,6 +1247,7 @@
   }
 
   async function run(action: () => Promise<unknown>, success: string): Promise<boolean> {
+    if (busy) return false;
     busy = true;
     message = "";
     try {
@@ -1265,7 +1275,8 @@
     dialog = "entity";
   }
 
-  function openNote(): void {
+  export function openNote(): void {
+    if (dialog === "note") return;
     noteTitle = "";
     noteFolder = DEFAULT_NOTE_FOLDER;
     noteBody = "";
@@ -1273,6 +1284,26 @@
     noteProject = "";
     dialog = "note";
     void tick().then(() => noteTitleInput?.focus());
+  }
+
+  function focusDialog(node: HTMLElement) {
+    const previous = document.activeElement as HTMLElement | null;
+    const controls = () => [...node.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary, [tabindex="0"]')]
+      .filter((element) => element.getClientRects().length > 0);
+    void tick().then(() => (node.querySelector<HTMLElement>("input, textarea, select") ?? controls()[0])?.focus());
+    const keydown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.stopPropagation();
+        if (!busy) dialog = null;
+      }
+      if (event.key !== "Tab") return;
+      const items = controls();
+      const first = items[0], last = items[items.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+    };
+    node.addEventListener("keydown", keydown);
+    return { destroy() { node.removeEventListener("keydown", keydown); previous?.focus(); } };
   }
 
   function beginNestedEntity(kind: "client" | "project"): void {
@@ -1360,7 +1391,7 @@
   function openMigration(task?: TaskRecord): void {
     selectedTask = task;
     migrationTasks = task ? [task] : tasksByScope("meeting-draft");
-    migrationTarget = snapshot.projects[0]?.path ?? snapshot.clients[0]?.path ?? "";
+    migrationTarget = "";
     migrationBatch = undefined;
     dialog = "migrate";
   }
@@ -1368,7 +1399,7 @@
   function openKnowledge(path: string, status?: string): void {
     selectedKnowledgePath = path;
     knowledgeStatus = status || "待处理";
-    knowledgeProject = "";
+    knowledgeProject = resolveProject(snapshot.knowledge.find((entry) => entry.path === path)?.project)?.path ?? "";
     knowledgePublishTitle = snapshot.knowledge.find((entry) => entry.path === path)?.name ?? "";
     knowledgePublication = undefined;
     dialog = "knowledge";
@@ -1556,11 +1587,11 @@
     if (succeeded) dialog = null;
   }
 
-  function tasksByScope(scope: TaskRecord["scope"]): TaskRecord[] {
+  $: tasksByScope = (scope: TaskRecord["scope"]): TaskRecord[] => {
     return snapshot.tasks.filter((task) => task.scope === scope && !task.completed && !task.migrated).slice(0, 8);
   }
 
-  function tasksForWidget(widgetId: string, scope: TaskRecord["scope"]): TaskRecord[] {
+  $: tasksForWidget = (widgetId: string, scope: TaskRecord["scope"]): TaskRecord[] => {
     const rows = snapshot.tasks.filter((task) => task.scope === scope && !task.completed);
     if (widgetId === "tasks.today") {
       const today = formatDate(new Date(), "YYYY-MM-DD");
@@ -1569,7 +1600,7 @@
     return rows.slice(0, 8);
   }
 
-  function calendarTasks(): TaskRecord[] {
+  $: calendarTasks = (): TaskRecord[] => {
     const today = new Date();
     const from = formatDate(today, "YYYY-MM-DD");
     const untilDate = new Date(today);
@@ -1578,7 +1609,7 @@
     return snapshot.tasks.filter((task) => !task.completed && task.due && task.due >= from && task.due <= until).slice(0, 8);
   }
 
-  function knowledgeForWidget(widgetId: string) {
+  $: knowledgeForWidget = (widgetId: string) => {
     const rows = [...snapshot.knowledge].sort((left, right) => (right.updatedAt ?? 0) - (left.updatedAt ?? 0));
     if (widgetId === "knowledge.inbox") return rows.filter((entry) => !entry.status || entry.status === "待处理");
     if (widgetId === "knowledge.triage") return rows.filter((entry) => entry.status === "待沉淀" || entry.status === "待读");
@@ -1701,6 +1732,7 @@
               </div>
               <button class="qwb-button qwb-button-primary qwb-full" on:click={() => openTask()}>添加项目任务</button>
             {:else if item.widgetId === "tasks.today" || item.presetId === "tasks.today-focus"}
+{#if visibleFocusTasks(item).length > 50}<button class="qwb-button qwb-button-subtle" on:click={() => (focusExpanded = !focusExpanded)}>{focusExpanded ? "收起至前 50 条" : `共 ${visibleFocusTasks(item).length} 条 · 展开全部`}</button>{/if}
               <div class="qwb-focus-toolbar">
                 <div class="qwb-focus-quick" aria-label="今日焦点快捷筛选">
                   {#each [["all", "全部"], ["overdue", "逾期"], ["today", "今天"], ["high", "高优先"]] as option}
@@ -1708,7 +1740,7 @@
                   {/each}
                   <button type="button" class="qwb-filter-toggle" class:active={focusFiltersVisible(item)} aria-expanded={focusFiltersVisible(item)} on:click={() => toggleFocusFilters(item)}>{focusFiltersVisible(item) ? "完成" : "筛选"}<span>{visibleFocusTasks(item).length} 条</span></button>
                 </div>
-                <button class="qwb-yolo-button" title="分析当前筛选下的全部任务" on:click={() => run(() => openFocusYolo(item), "YOLO 已打开；当前列表已复制，请粘贴到输入框。")}>YOLO 处理本页</button>
+                <button class="qwb-yolo-button" title="分析本页显示的任务" on:click={() => run(() => openFocusYolo(item), "YOLO 已打开；当前列表已复制，请粘贴到输入框。")}>YOLO 处理本页</button>
               </div>
 
               {#if focusFiltersVisible(item)}
@@ -1723,11 +1755,11 @@
               {/if}
 
               <div class="qwb-focus-list">
-                {#each visibleFocusTasks(item) as task (task.id)}
+                {#each visibleFocusTasks(item).slice(0, focusExpanded ? undefined : 50) as task (task.id)}
                   <div class:completed={task.completed} class="qwb-focus-row">
                     <input type="checkbox" checked={task.completed} disabled={!controller.settings.writesEnabled || busy || task.scope === "meeting-draft"} on:change={(event) => run(() => controller.updateTask(task, { completed: (event.currentTarget as HTMLInputElement).checked }), "任务状态已更新")} />
                     <div class="qwb-focus-content">
-                      <button class="qwb-focus-title" title={task.text} on:click={() => controller.openPath(task.path)}>{task.text}</button>
+                      <button class="qwb-focus-title" title={task.text} on:click={() => controller.openPath(task.path)}>{reviewTaskTitle(task.text, task.sourceName)}</button>
                       <div class="qwb-focus-meta">
                         <span class="qwb-focus-source"><b>{scopeLabel(task.scope)}</b><em>{task.sourceName}</em></span>
                         <time>{focusDate(task)}</time>
@@ -1927,11 +1959,11 @@
               {:else}
                 {#if sharedProject()}<div class="qwb-shared-project"><span><small>当前共享项目</small><strong>{sharedProject()!.name}</strong></span><button on:click={() => controller.openPath(sharedProject()!.path)}>打开</button><button on:click={() => (sharedProjectPath = "")}>清除</button></div>{/if}
                 <div class="qwb-widget-search"><input value={widgetSearch[itemKey(item)] ?? ""} placeholder="搜索项目名称、客户或类型" on:input={(event) => (widgetSearch = { ...widgetSearch, [itemKey(item)]: (event.currentTarget as HTMLInputElement).value })} /><span>{scopedProjects(item).length}</span></div>
-                <div class="qwb-project-search-results">{#each scopedProjects(item).slice(0, 8) as project}<div class:active={sharedProjectPath === project.path}><button class="qwb-project-choice" on:click={() => (sharedProjectPath = project.path)}><strong>{project.name}</strong><span><small>{projectClientLabel(project)}</small><small>{project.projectType || "未分类"}</small><small>{project.status || project.phase || "开放"}</small></span></button><div class="qwb-project-choice-actions"><button class:active={sharedProjectPath === project.path} on:click={() => (sharedProjectPath = project.path)}>{sharedProjectPath === project.path ? "已选择" : "选择"}</button><button on:click={() => controller.openPath(project.path)}>打开</button></div></div>{:else}<p class="qwb-empty">没有匹配项目。</p>{/each}</div>
+                <div class="qwb-project-search-results">{#each scopedProjects(item).slice(0, 8) as project}<div class:active={sharedProjectPath === project.path}><button class="qwb-project-choice" on:click={() => (sharedProjectPath = project.path)}><strong>{project.name}</strong><span><small>{projectClientLabel(project)}</small><small>{project.projectType || "未分类"}</small><small>{projectStatusLabel(project.status)}</small></span></button><div class="qwb-project-choice-actions"><button class:active={sharedProjectPath === project.path} on:click={() => (sharedProjectPath = project.path)}>{sharedProjectPath === project.path ? "已选择" : "选择"}</button><button on:click={() => controller.openPath(project.path)}>打开</button></div></div>{:else}<p class="qwb-empty">没有匹配项目。</p>{/each}</div>
               {/if}
             {:else if item.widgetId === "projects.list" || (item.widgetId === "view.list" && dataSource(item) === "projects" && !["risks", "milestones"].includes(queryMode(item)))}
               <div class="qwb-widget-search"><input value={widgetSearch[itemKey(item)] ?? ""} placeholder="搜索项目" on:input={(event) => (widgetSearch = { ...widgetSearch, [itemKey(item)]: (event.currentTarget as HTMLInputElement).value })} /><span>{scopedProjects(item).length}</span></div>
-              <div class="qwb-project-table">{#each projectRowsForWidget(item) as project}<button on:click={() => controller.openPath(project.path)}><span><strong>{project.name}</strong><small>{project.client || "未关联客户"}</small></span><em>{project.projectType || "未分类"}</em><em>{project.status || project.phase || "开放"}</em><time>{project.due || ""}</time></button>{:else}<p class="qwb-empty">没有匹配项目。</p>{/each}</div>
+              <div class="qwb-project-table">{#each projectRowsForWidget(item) as project}<button on:click={() => controller.openPath(project.path)}><span><strong>{project.name}</strong><small>{project.client || "未关联客户"}</small></span><em>{project.projectType || "未分类"}</em><em>{projectStatusLabel(project.status)}</em><time>{project.phase || ""}</time></button>{:else}<p class="qwb-empty">没有匹配项目。</p>{/each}</div>
             {:else if item.widgetId === "view.board" && dataSource(item) === "clients"}
               <div class="qwb-board qwb-client-board">
                 {#each clientStatusGroups(item) as group}<section><header><strong>{group[0]}</strong><span>{group[1].length}</span></header><div class="qwb-board-column-body">{#each group[1] as client}<article class="qwb-board-card"><button class="qwb-board-card-main" on:click={() => controller.openPath(client.path)}><strong>{client.name}</strong><small>{client.organizationType || client.businessDomains || "客户"}</small><time>{client.followupDate || "未安排跟进"}</time></button></article>{/each}</div></section>{:else}<p class="qwb-empty">暂无客户关系数据。</p>{/each}
@@ -1951,7 +1983,7 @@
                           <button class="qwb-board-card-main" on:click={() => controller.openPath(project.path)}>
                             <strong>{project.name}</strong>
                             <small>{project.client || project.projectType || "开放项目"}</small>
-                            {#if project.due}<time>{project.due}</time>{/if}
+                            {#if project.phase}<time>{project.phase}</time>{/if}
                           </button>
                         </article>
                       {/each}
@@ -1967,7 +1999,7 @@
               {:else if dataSource(item) === "suppliers"}
                 {#each selectedSupplier(item) ? [selectedSupplier(item)!] : [] as supplier}<div class="qwb-project-summary"><button class="qwb-summary-title" on:click={() => controller.openPath(supplier.path)}><span class="qwb-entity-icon supplier">S</span><span><strong>{supplier.name}</strong><small>{supplier.detail || supplier.related || "供应商"}</small></span><em>{supplier.status || "未设置"}</em></button><dl><div><dt>状态</dt><dd>{supplier.status || "未设置"}</dd></div><div><dt>关联</dt><dd>{supplier.related || "未关联"}</dd></div><div><dt>更新时间</dt><dd>{supplier.updatedAt ? new Date(supplier.updatedAt).toLocaleDateString("zh-CN") : "未知"}</dd></div></dl><div class="qwb-summary-actions"><button on:click={() => (sharedSupplierPath = supplier.path)}>设为共享供应商</button><button on:click={() => controller.openPath(supplier.path)}>打开供应商</button><button on:click={() => controller.openYolo(supplier.path)}>YOLO</button></div></div>{:else}<p class="qwb-empty">请先选择供应商。</p>{/each}
               {:else}
-                {#each selectedProject(item) ? [selectedProject(item)!] : [] as project}<div class="qwb-project-summary"><button class="qwb-summary-title" on:click={() => controller.openPath(project.path)}><span class="qwb-entity-icon project">P</span><span><strong>{project.name}</strong><small>{projectClientLabel(project)}</small></span><em>{project.status || "开放"}</em></button><dl><div><dt>客户</dt><dd>{projectClientLabel(project)}</dd></div><div><dt>类型</dt><dd>{project.projectType || "未设置"}</dd></div><div><dt>研制阶段</dt><dd>{project.phase || "未设置"}</dd></div><div><dt>目标日期</dt><dd>{project.due || "未设置"}</dd></div><div><dt>任务</dt><dd>{projectHealth(project).completed}/{projectHealth(project).completed + projectHealth(project).open} 已完成</dd></div><div><dt>最近更新</dt><dd>{projectUpdatedLabel(project)}</dd></div></dl><div class="qwb-project-next"><small>明确下一步</small><p>{project.detail || "尚未填写明确下一步。"}</p></div><div class="qwb-summary-actions"><button disabled={sharedProjectPath === project.path} on:click={() => (sharedProjectPath = project.path)}>{sharedProjectPath === project.path ? "当前共享项目" : "设为共享项目"}</button><button on:click={() => controller.openPath(project.path)}>打开项目</button><button on:click={() => controller.openYolo(project.path)}>YOLO</button></div></div>{:else}<p class="qwb-empty">请选择或配置一个项目。</p>{/each}
+                {#each selectedProject(item) ? [selectedProject(item)!] : [] as project}<div class="qwb-project-summary"><button class="qwb-summary-title" on:click={() => controller.openPath(project.path)}><span class="qwb-entity-icon project">P</span><span><strong>{project.name}</strong><small>{projectClientLabel(project)}</small></span><em>{projectStatusLabel(project.status)}</em></button><dl><div><dt>客户</dt><dd>{projectClientLabel(project)}</dd></div><div><dt>类型</dt><dd>{project.projectType || "未设置"}</dd></div><div><dt>研制阶段</dt><dd>{project.phase || "未设置"}</dd></div><div><dt>任务</dt><dd>{projectHealth(project).completed}/{projectHealth(project).completed + projectHealth(project).open} 已完成</dd></div><div><dt>最近更新</dt><dd>{projectUpdatedLabel(project)}</dd></div></dl><div class="qwb-project-next"><small>明确下一步</small><p>{project.detail || "尚未填写明确下一步。"}</p></div><div class="qwb-summary-actions"><button disabled={sharedProjectPath === project.path} on:click={() => (sharedProjectPath = project.path)}>{sharedProjectPath === project.path ? "当前共享项目" : "设为共享项目"}</button><button on:click={() => controller.openPath(project.path)}>打开项目</button><button on:click={() => controller.openYolo(project.path)}>YOLO</button></div></div>{:else}<p class="qwb-empty">请选择或配置一个项目。</p>{/each}
               {/if}
             {:else if item.widgetId === "projects.health" || (item.widgetId === "view.metrics" && metricKind(item) === "health")}
               <div class="qwb-health-list">{#each scopedProjects(item) as project}<button on:click={() => controller.openPath(project.path)}><header><i class={projectHealth(project).level}></i><span><strong>{project.name}</strong><small>{projectClientLabel(project)}</small></span><em class={projectHealth(project).level}>{healthLabel(projectHealth(project).level)}</em></header><p>{projectHealth(project).reasons.join(" · ") || "没有发现风险信号"}</p><dl><div><dt>逾期</dt><dd>{projectHealth(project).overdue}</dd></div><div><dt>7 天内</dt><dd>{projectHealth(project).dueSoon}</dd></div><div><dt>待处理</dt><dd>{projectHealth(project).open}</dd></div><div><dt>未安排</dt><dd>{projectHealth(project).unscheduled}</dd></div></dl></button>{:else}<p class="qwb-empty">请选择或配置项目。</p>{/each}</div>
@@ -2009,8 +2041,8 @@
               {/if}
             {:else if item.widgetId === "projects.milestones" || (item.widgetId === "view.list" && dataSource(item) === "projects" && queryMode(item) === "milestones")}
               <div class="qwb-entity-list compact">
-                {#each snapshot.projects.filter((project) => project.due).sort((left, right) => (left.due ?? "").localeCompare(right.due ?? "")).slice(0, 10) as project}
-                  <button on:click={() => controller.openPath(project.path)}><span class="qwb-entity-icon project">◆</span><span><strong>{project.name}</strong><small>{project.phase || "当前阶段"} · {project.due}</small></span><i>›</i></button>
+                {#each snapshot.projects.filter((project) => nextProjectTaskDate(project.path)).sort((left, right) => nextProjectTaskDate(left.path).localeCompare(nextProjectTaskDate(right.path))).slice(0, 10) as project}
+                  <button on:click={() => controller.openPath(project.path)}><span class="qwb-entity-icon project">◆</span><span><strong>{project.name}</strong><small>{project.phase || "阶段未设置"} · 下一任务 {nextProjectTaskDate(project.path)}</small></span><i>›</i></button>
                 {:else}<p class="qwb-empty">开放项目尚未设置里程碑或截止日期。</p>{/each}
               </div>
             {:else if item.widgetId.startsWith("projects.")}
@@ -2185,33 +2217,33 @@
 
 {#if dialog}
   <div class="qwb-modal-backdrop" role="presentation" on:click={(event) => event.currentTarget === event.target && (dialog = null)}>
-    <div class="qwb-modal" class:qwb-note-modal={dialog === "note"} role="dialog" aria-modal="true" aria-labelledby="qwb-dialog-title">
-      <header><div><span class="qwb-eyebrow">{dialog === "note" ? "PROJECT NOTE" : "SAFE WORKFLOW"}</span><h2 id="qwb-dialog-title">{dialogTitle(dialog)}</h2>{#if dialog === "note"}<p>把方案过程、关键判断和下一步沉淀到项目上下文中。</p>{/if}</div><button aria-label="关闭" on:click={() => (dialog = null)}>×</button></header>
+    <div class="qwb-modal" use:focusDialog class:qwb-note-modal={dialog === "note"} role="dialog" aria-modal="true" aria-labelledby="qwb-dialog-title">
+      <header><div><span class="qwb-eyebrow">{dialog === "note" ? "PROJECT NOTE" : "ASTERISM"}</span><h2 id="qwb-dialog-title">{dialogTitle(dialog)}</h2>{#if dialog === "note"}<p>把方案过程、关键判断和下一步沉淀到项目上下文中。</p>{/if}</div><button aria-label="关闭" on:click={() => (dialog = null)}>×</button></header>
       <div class="qwb-modal-body" class:qwb-dialog-form={dialog !== "note"}>
+      {#if message}<p class="qwb-dialog-notice" role="status">{message}</p>{/if}
       {#if !controller.settings.writesEnabled}
         <div class="qwb-inline-warning">写入尚未启用。请先在插件设置中阅读说明并确认。</div>
       {/if}
       {#if dialog === "note"}
         <form class="qwb-dialog-form qwb-note-form" on:submit|preventDefault={submitNote}>
           <section class="qwb-note-section">
-            <div class="qwb-note-section-heading"><div><h3>笔记内容</h3><p>标题用于检索，正文可以先记录最小必要信息。</p></div><span>必填</span></div>
-            <label class="qwb-note-title-field">标题<input bind:this={noteTitleInput} bind:value={noteTitle} placeholder="例如：XX 项目热控方案讨论" /></label>
-            <label>正文（可选）<textarea bind:value={noteBody} rows="7" placeholder="记录背景、判断、结论或下一步……"></textarea></label>
+            <label class="qwb-note-title-field">标题（必填）<input bind:this={noteTitleInput} bind:value={noteTitle} placeholder="例如：XX 项目热控方案讨论" /></label>
+            <label>正文（可选）<textarea bind:value={noteBody} rows="4" placeholder="记录背景、判断、结论或下一步……"></textarea></label>
           </section>
 
           <section class="qwb-note-section">
-            <div class="qwb-note-section-heading"><div><h3>关联对象</h3><p>优先关联项目；客户用于补充业务上下文。</p></div><span>可选</span></div>
             <SearchableSelect id="qwb-note-project" label="关联项目（推荐）" bind:value={noteProject} options={projectOptions()} emptyLabel="暂不关联项目" help="可按项目名称、客户、状态或路径搜索。" />
             <SearchableSelect id="qwb-note-client" label="关联客户" bind:value={noteClient} options={clientOptions()} emptyLabel="暂不关联客户" help="项目已经明确时，客户可以留空。" />
           </section>
 
           <details class="qwb-note-location">
-            <summary><span><strong>保存位置</strong><small>{noteTargetPath()}</small></span><em>调整</em></summary>
+            <summary><span><strong>保存位置</strong><small>{noteFolder.split("/").pop() || "库根目录"}</small></span><em>调整</em></summary>
+            <p class="qwb-field-help">{noteTargetPath()}</p>
             <label>目录<input bind:value={noteFolder} list="qwb-note-folder-options" placeholder="留空则保存到库根目录" /></label>
             <datalist id="qwb-note-folder-options">{#each noteFolderSuggestions() as folder}<option value={folder}></option>{/each}</datalist>
           </details>
 
-          <div class="qwb-note-receipt" aria-live="polite"><span>写入后将自动打开</span><strong>{noteProject ? relationLabel(noteProject) : "未关联项目"}</strong><small>{noteClient ? `客户：${relationLabel(noteClient)}` : "客户：未关联"}</small></div>
+
           <div class="qwb-modal-actions"><button type="button" class="qwb-button qwb-button-subtle" on:click={() => (dialog = null)}>取消</button><button type="submit" class="qwb-button qwb-button-primary" disabled={!controller.settings.writesEnabled || !noteTitle.trim() || busy}>{busy ? "创建中…" : "创建项目笔记"}</button></div>
         </form>
       {:else if dialog === "entity"}
@@ -2219,7 +2251,7 @@
         <label>名称<input bind:value={entityName} placeholder="输入清晰、可检索的名称" /></label>
         {#if entityKind === "project"}<SearchableSelect id="qwb-entity-client" label="关联客户" bind:value={relatedClient} options={clientOptions()} emptyLabel="暂不关联客户" /><button class="qwb-text-action" type="button" on:click={() => beginNestedEntity("client")}>＋ 没有客户？先创建客户</button>{/if}
         {#if entityKind === "meeting"}<SearchableSelect id="qwb-entity-project" label="关联项目" bind:value={relatedProject} options={projectOptions()} emptyLabel="暂不关联项目" /><button class="qwb-text-action" type="button" on:click={() => beginNestedEntity("project")}>＋ 没有项目？先创建项目</button><SearchableSelect id="qwb-meeting-client" label="关联客户（可选）" bind:value={relatedClient} options={clientOptions()} emptyLabel="暂不关联客户" /><label>日期<input type="date" bind:value={entityDate} /></label><div class="qwb-form-row"><label>开始时间<input type="time" bind:value={entityStartTime} /></label><label>结束时间<input type="time" min={entityStartTime || undefined} bind:value={entityEndTime} /></label></div>{/if}
-        <div class="qwb-inline-preview"><strong>写入预览</strong><div>{entityTargetFolder()}/{entityKind === "meeting" && entityDate ? `${entityDate} ` : ""}{entityName || "未命名"}.md</div><small>确认后仍会执行模板、重名与路径预检。</small></div>
+        <details class="qwb-save-location"><summary><span>保存位置</span><strong>{entityTargetFolder().split("/").pop()}</strong></summary><p>{entityTargetFolder()}/{entityKind === "meeting" && entityDate ? `${entityDate} ` : ""}{entityName || "未命名"}.md</p></details>
         <button class="qwb-text-action" type="button" disabled={!entityName.trim() || busy} on:click={() => run(previewEntityTemplate, "模板预览已生成")}>生成完整模板预览</button>
         {#if entityTemplatePreview}<pre class="qwb-template-preview">{entityTemplatePreview}</pre>{/if}
         <div class="qwb-modal-actions"><button class="qwb-button qwb-button-subtle" on:click={() => (dialog = null)}>取消</button><button class="qwb-button qwb-button-primary" disabled={!controller.settings.writesEnabled || !entityName.trim() || busy} on:click={submitEntity}>确认创建</button></div>
@@ -2227,7 +2259,7 @@
         <SearchableSelect id="qwb-task-project" label="项目" bind:value={projectPath} options={projectOptions()} emptyLabel="尚未选择项目" />
         <label>任务<textarea bind:value={taskText} rows="3" placeholder="描述下一步具体行动"></textarea></label>
         <div class="qwb-form-row"><label>截止日期<input type="date" bind:value={taskDue} /></label><label>优先级<select bind:value={taskPriority}><option value="highest">最高</option><option value="high">高</option><option value="normal">普通</option><option value="low">低</option><option value="lowest">最低</option></select></label></div>
-        <div class="qwb-inline-preview"><strong>写入预览</strong><div>{taskText || "未填写任务"}{taskDue ? ` · 截止 ${taskDue}` : ""}</div><small>{projectPath ? relationLabel(projectPath) : "尚未选择项目"}</small></div>
+        <div class="qwb-save-location"><span>保存到项目待办</span><strong>{projectPath ? relationLabel(projectPath) : "请先选择项目"}</strong></div>
         <div class="qwb-modal-actions"><button class="qwb-button qwb-button-subtle" on:click={() => (dialog = null)}>取消</button>{#if controller.tasksIntegrationAvailable()}<button class="qwb-button" disabled={!controller.settings.writesEnabled || !projectPath || busy} on:click={submitTaskWithTasks}>Tasks 高级新建</button>{/if}<button class="qwb-button qwb-button-primary" disabled={!controller.settings.writesEnabled || !projectPath || !taskText.trim() || busy} on:click={submitTask}>添加任务</button></div>
       {:else if dialog === "task-edit"}
         {#if taskEditReason}<div class="qwb-inline-warning">{taskEditReason}</div>{/if}
@@ -2237,7 +2269,7 @@
       {:else if dialog === "schedule"}
         <p class="qwb-schedule-task">{selectedTask?.text}</p>
         <label>计划日期<input type="date" bind:value={taskScheduled} /></label>
-        <div class="qwb-inline-preview"><strong>日期职责保持分离</strong><div>计划日期使用 Tasks 的 ⏳ 字段；原有 📅 截止日期不会改变。</div><small>保存后可在 Full Calendar 中继续拖到具体时间段。</small></div>
+        <p class="qwb-field-help">计划日期用于安排何时处理，不改变截止日期。</p>
         <div class="qwb-modal-actions"><button class="qwb-button qwb-button-subtle" on:click={() => (dialog = null)}>取消</button><button class="qwb-button" on:click={() => run(() => controller.openCalendar())}>打开完整日程</button><button class="qwb-button qwb-button-primary" disabled={!controller.settings.writesEnabled || !taskScheduled || busy} on:click={submitTaskSchedule}>保存计划日期</button></div>
       {:else if dialog === "migrate"}
         <p>预览：将 {migrationTasks.length} 条会议草稿迁移到同一目标项目或客户。每条行动都有独立回执；成功项写入稳定来源标记，重复执行不会重复创建。</p>
@@ -2254,7 +2286,7 @@
         <div class="qwb-modal-actions"><button class="qwb-button qwb-button-subtle" on:click={() => (dialog = null)}>关闭</button>{#if migrationBatch?.retryItems.length}<button class="qwb-button" disabled={busy} on:click={retryMigration}>继续恢复 {migrationBatch.retryItems.length} 条</button>{/if}<button class="qwb-button qwb-button-primary" disabled={!controller.settings.writesEnabled || !migrationTarget || busy || migrationBatch?.status === "completed"} on:click={submitMigration}>{migrationBatch ? "重新运行批次" : "预检并迁移"}</button></div>
       {:else if dialog === "knowledge"}
         <label>处理状态<select bind:value={knowledgeStatus}><option>待处理</option><option>待沉淀</option><option>待读</option><option>已归档</option><option>重复</option></select></label>
-        <SearchableSelect id="qwb-knowledge-project" label="关联项目" bind:value={knowledgeProject} options={projectOptions()} emptyLabel="暂不关联项目" />
+        <SearchableSelect id="qwb-knowledge-project" label="关联项目" bind:value={knowledgeProject} options={projectOptions()} emptyLabel="保留现有关联" />
         <div class="qwb-inline-preview"><strong>状态处理</strong><small>只更新来源笔记的 triage_status 与项目关联，不改变现有模板。</small></div>
         <div class="qwb-modal-actions"><button class="qwb-button qwb-button-subtle" on:click={() => (dialog = null)}>取消</button><button class="qwb-button" disabled={!controller.settings.writesEnabled || busy} on:click={submitKnowledge}>仅保存状态</button></div>
         <hr />

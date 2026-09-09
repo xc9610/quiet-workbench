@@ -13,7 +13,13 @@ const scriptContext = await esbuild.context({
   treeShaking: true,
   minify: production,
   outfile: "main.js",
-  plugins: [sveltePlugin({ compilerOptions: { css: "injected", runes: false } })]
+  // Svelte's default production hash is filename-based. Obsidian keeps injected
+  // styles across plugin reloads, so include CSS content to avoid stale rules.
+  plugins: [sveltePlugin({ compilerOptions: {
+    css: "injected",
+    runes: false,
+    cssHash: ({ hash, css, filename }) => `svelte-qwb-${hash(filename + css)}`
+  } })]
 });
 
 const styleContext = await esbuild.context({

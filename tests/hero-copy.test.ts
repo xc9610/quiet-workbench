@@ -10,6 +10,18 @@ import { buildHeroContext, buildHeroMetrics } from "../src/domain/hero-metrics";
 const emptyContext = { overdue: 0, dueToday: 0, upcoming: 0, missingNext: 0 };
 
 describe("hero copy", () => {
+  it("matches the active project task scope and accepts tasks as a next action", () => {
+    const context = buildHeroContext({
+      projects: [{ path: "active.md" }, { path: "empty.md" }],
+      tasks: [
+        { path: "active.md", scope: "project", completed: false, due: "2026-08-01" },
+        { path: "closed.md", scope: "project", completed: false, due: "2026-08-01" }
+      ]
+    }, "2026-09-09");
+    expect(context.overdue).toBe(1);
+    expect(context.missingNext).toBe(1);
+  });
+
   it("keeps the daily copy stable for the same local date", () => {
     expect(selectHeroCopy(DEFAULT_HERO_SETTINGS, "2026-08-27", emptyContext))
       .toEqual(selectHeroCopy(DEFAULT_HERO_SETTINGS, "2026-08-27", emptyContext));
@@ -59,7 +71,7 @@ describe("hero copy", () => {
     expect(context).toEqual({ overdue: 1, dueToday: 1, upcoming: 1, missingNext: 1 });
     expect(buildHeroMetrics(context)).toEqual(expect.arrayContaining([
       expect.objectContaining({ label: "逾期任务", value: 1, tone: "danger" }),
-      expect.objectContaining({ label: "今天到期", value: 1, tone: "accent" })
+      expect.objectContaining({ label: "今日待办", value: 1, tone: "accent" })
     ]));
   });
 });

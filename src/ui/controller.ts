@@ -136,7 +136,7 @@ export interface WorkbenchController {
   addProjectTaskWithTasks(projectPath: string): Promise<"committed" | "cancelled" | "unavailable">;
   editTaskWithTasks(task: TaskRecord): Promise<"committed" | "cancelled" | "unavailable">;
   scheduleTaskInCalendar(task: TaskRecord, date: string): Promise<void>;
-  updateTask(task: TaskRecord, patch: { completed?: boolean; due?: string | null; priority?: TaskRecord["priority"] }): Promise<TransactionReceipt>;
+  updateTask(task: TaskRecord, patch: { completed?: boolean; due?: string | null; scheduled?: string | null; priority?: TaskRecord["priority"] }): Promise<TransactionReceipt>;
   migrateMeetingTask(task: TaskRecord, targetPath: string): Promise<TransactionReceipt | undefined>;
   migrateMeetingTasks(tasks: TaskRecord[], targetPath: string): Promise<MeetingMigrationBatchResult>;
   retryMeetingMigration(batch: MeetingMigrationBatchResult): Promise<MeetingMigrationBatchResult>;

@@ -288,13 +288,9 @@ class PluginWorkbenchController implements WorkbenchController {
   }
 
   async createBlankNote(): Promise<void> {
-    this.requireWrites();
-    const commands = (this.plugin.app as typeof this.plugin.app & {
-      commands?: { executeCommandById(id: string): boolean };
-    }).commands;
-    if (!commands?.executeCommandById("file-explorer:new-file")) {
-      throw new Error("Obsidian 的“新建笔记”命令暂不可用。");
-    }
+    await this.plugin.activateWorkbench();
+    const view = this.plugin.app.workspace.getLeavesOfType(WORKBENCH_VIEW_TYPE)[0]?.view;
+    if (view instanceof WorkbenchItemView) view.openNoteForm();
   }
 
   async createNote(input: CreateNoteInput): Promise<TransactionReceipt> {
@@ -330,7 +326,8 @@ class PluginWorkbenchController implements WorkbenchController {
   async openPath(path: string): Promise<void> {
     const file = this.plugin.app.vault.getAbstractFileByPath(normalizePath(path));
     if (!(file instanceof TFile)) throw new Error(`文件不存在：${path}`);
-    await this.plugin.app.workspace.getLeaf(false).openFile(file);
+    const reviewing = this.plugin.app.workspace.getActiveViewOfType(ProjectReviewItemView);
+    await this.plugin.app.workspace.getLeaf(reviewing ? "tab" : false).openFile(file);
   }
 
   async createEntity(input: CreateEntityInput): Promise<TransactionReceipt> {
@@ -396,7 +393,7 @@ class PluginWorkbenchController implements WorkbenchController {
     await this.refresh();
   }
 
-  async updateTask(task: TaskRecord, patch: { completed?: boolean; due?: string | null; priority?: TaskRecord["priority"] }): Promise<TransactionReceipt> {
+  async updateTask(task: TaskRecord, patch: { completed?: boolean; due?: string | null; scheduled?: string | null; priority?: TaskRecord["priority"] }): Promise<TransactionReceipt> {
     this.requireWrites();
     const receipt = await this.tasks.update(task, patch);
     await this.afterReceipt(receipt, task.path);
@@ -441,7 +438,7 @@ class PluginWorkbenchController implements WorkbenchController {
     }
     const before = await this.vaultPort.read(path);
     let after = setFrontmatterField(before, "triage_status", status);
-    after = setFrontmatterField(after, "project", projectPath ? toWikiLink(projectPath) : "");
+    if (projectPath !== undefined) after = setFrontmatterField(after, "project", projectPath ? toWikiLink(projectPath) : "");
     const receipt = await this.transactions.execute({
       label: `Update knowledge: ${path}`,
       operations: [{ kind: "write", path, content: after, expectedRevision: contentRevision(before) }]
@@ -1078,7 +1075,7 @@ function entityReferences(candidate: EntityRecord, active: EntityRecord | undefi
 }
 
 function isClosedStatus(status?: string): boolean {
-  return ["closed", "done", "completed", "archived", "已完成", "已关闭", "已归档"].includes((status ?? "").trim().toLowerCase());
+  return ["closed", "done", "completed", "archived", "归档", "停止", "完成", "已完成", "已关闭", "已归档"].includes((status ?? "").trim().toLowerCase());
 }
 
 function sanitizeTitle(value: string): string {

@@ -1,4 +1,5 @@
 import type { TaskRecord } from "../core/types";
+import { isClosedProjectStatus } from "./project-status";
 import type { EntitySummary } from "../ui/controller";
 import { calculateProjectHealth, dateAfter, effectiveTaskDate, isWaitingTask, type ProjectHealthResult } from "./widget-data";
 
@@ -211,17 +212,25 @@ function reviewPriority(project: EntitySummary, today: string, allTasks: readonl
 }
 
 function entitySummaryReferencesProject(candidate: EntitySummary, project: EntitySummary): boolean {
-  const haystack = [candidate.project, candidate.related, candidate.detail, candidate.name, candidate.path]
-    .filter(Boolean)
-    .join(" ")
-    .normalize("NFC")
-    .toLocaleLowerCase("zh-CN");
-  const projectName = project.name.normalize("NFC").toLocaleLowerCase("zh-CN");
-  const projectPath = project.path.replace(/\.md$/iu, "").normalize("NFC").toLocaleLowerCase("zh-CN");
-  return Boolean(projectName && haystack.includes(projectName)) || Boolean(projectPath && haystack.includes(projectPath));
+  const normalize = (value: string) => value.trim().replace(/\.md$/iu, "").normalize("NFC").toLocaleLowerCase("zh-CN");
+  const targets = new Set([project.name, project.path, ...(project.aliases ?? [])].map(normalize));
+  const values = [candidate.project, candidate.related].filter((value): value is string => Boolean(value));
+  for (const value of values) {
+    const links = [...value.matchAll(/\[\[([^\]]+)\]\]/gu)];
+    const references = links.length ? links.map((match) => match[1].split("|")[0].split("#")[0]) : value.split(/[、,，;]/u);
+    if (references.some((reference) => targets.has(normalize(reference)))) return true;
+  }
+  // Prose may contain an explicit wikilink, but shared words alone are not evidence.
+  return [...(candidate.detail ?? "").matchAll(/\[\[([^\]]+)\]\]/gu)]
+    .some((match) => targets.has(normalize(match[1].split("|")[0].split("#")[0])));
 }
 
-function isClosedProjectStatus(status?: string): boolean {
-  return ["closed", "done", "completed", "archived", "已完成", "已关闭", "已归档"]
-    .includes((status ?? "").trim().toLowerCase());
+/** Display only. Preserve the full original task text for writes and source navigation. */
+export function reviewTaskTitle(text: string, projectName: string): string {
+  const title = text.replace(/\[\[([^\]]+)\]\]/gu, (_match, link: string) => {
+    const [target, alias] = link.split("|");
+    const name = target.split("/").pop()?.replace(/\.md$/iu, "");
+    return name === projectName ? "" : alias || name || target;
+  }).replace(/(?:^|\s)#[\p{L}\p{N}_/-]+/gu, " ").replace(/\s+/gu, " ").trim();
+  return title || text;
 }

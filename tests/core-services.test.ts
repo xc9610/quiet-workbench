@@ -358,6 +358,25 @@ describe("WriteTransactionExecutor", () => {
 });
 
 describe("project tasks and meeting migration", () => {
+  it("updates and clears scheduled dates without changing deadlines or block IDs", async () => {
+    const vault = new MemoryVault();
+    vault.seed("projects/a.md", "## 待办\n- [ ] 检查 ⏳ 2026-08-18 📅 2026-08-20 ^schedule-1");
+    const tasks = new ProjectTaskService(vault, new WriteTransactionExecutor(vault));
+    let current = parseSingleTask(await vault.read("projects/a.md"), "projects/a.md", "project");
+    await tasks.update(current, { scheduled: "2026-08-19" });
+    let content = await vault.read("projects/a.md");
+    expect(content).toContain("⏳ 2026-08-19");
+    expect(content).not.toContain("2026-08-18");
+    expect(content).toContain("📅 2026-08-20");
+    expect(content).toMatch(/\^schedule-1$/);
+    current = parseSingleTask(content, "projects/a.md", "project");
+    await tasks.update(current, { scheduled: null });
+    content = await vault.read("projects/a.md");
+    expect(content).not.toContain("⏳");
+    expect(content).toContain("📅 2026-08-20");
+    expect(content).toMatch(/\^schedule-1$/);
+  });
+
   it("adds, completes, reschedules and protects task revisions", async () => {
     const vault = new MemoryVault();
     vault.seed("projects/a.md", "---\ntype: 项目\n---\n\n## 待办\n");

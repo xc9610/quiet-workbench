@@ -103,15 +103,22 @@ export class ProjectTaskService {
 
   async update(
     task: TaskRecord,
-    patch: { completed?: boolean; due?: string | null; priority?: TaskRecord["priority"] },
+    patch: { completed?: boolean; due?: string | null; scheduled?: string | null; priority?: TaskRecord["priority"] },
     completedOn = new Date()
   ): Promise<DetailedTransactionReceipt> {
-    if (patch.completed === undefined && patch.due === undefined && patch.priority === undefined) {
+    if (patch.completed === undefined && patch.due === undefined && patch.scheduled === undefined && patch.priority === undefined) {
       throw new Error("Task update has no changed fields.");
     }
     validateOptionalDate(patch.due ?? undefined, "due");
+    validateOptionalDate(patch.scheduled ?? undefined, "scheduled");
     return this.mutate(task, (raw, current) => {
       let updated = raw;
+      if (patch.scheduled !== undefined) {
+        updated = preserveBlockId(updated, (withoutBlock) => {
+          const withoutScheduled = withoutBlock.replace(/\s*⏳\s*\d{4}-\d{2}-\d{2}/gu, "").trimEnd();
+          return patch.scheduled ? `${withoutScheduled} ⏳ ${patch.scheduled}` : withoutScheduled;
+        });
+      }
       if (Object.prototype.hasOwnProperty.call(patch, "due")) {
         updated = preserveBlockId(updated, (withoutBlock) => {
           const withoutDue = withoutBlock.replace(/\s*📅\s*\d{4}-\d{2}-\d{2}/gu, "").trimEnd();

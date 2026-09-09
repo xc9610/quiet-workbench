@@ -29,6 +29,11 @@ export class WorkbenchItemView extends ItemView {
     return this.controller === controller;
   }
 
+  openNoteForm(): void {
+    const component = this.component as { openNote?: () => void } | undefined;
+    component?.openNote?.();
+  }
+
   async onOpen(): Promise<void> {
     const generation = ++this.openGeneration;
     this.contentEl.empty();

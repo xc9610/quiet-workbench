@@ -12,13 +12,14 @@ export interface HeroMetric {
 }
 
 export interface HeroMetricSnapshot {
-  tasks: ReadonlyArray<Pick<TaskRecord, "completed" | "migrated" | "scheduled" | "due">>;
-  projects: ReadonlyArray<{ detail?: string }>;
+  tasks: ReadonlyArray<Pick<TaskRecord, "completed" | "migrated" | "scheduled" | "due"> & Partial<Pick<TaskRecord, "scope" | "path">>>;
+  projects: ReadonlyArray<{ path?: string; detail?: string; nextAction?: string }>;
 }
 
 export function buildHeroContext(current: HeroMetricSnapshot, today: string): HeroCopyContext {
   const weekEnd = dateAfter(today, 7);
-  const tasks = current.tasks.filter((task) => !task.completed && !task.migrated);
+  const tasks = current.tasks.filter((task) => !task.completed && !task.migrated)
+    .filter((task) => task.scope !== "project" || current.projects.some((project) => project.path === task.path));
   const overdue = tasks.filter((task) => {
     const date = effectiveTaskDate(task);
     return Boolean(date && date < today);
@@ -28,14 +29,15 @@ export function buildHeroContext(current: HeroMetricSnapshot, today: string): He
     const date = effectiveTaskDate(task);
     return Boolean(date && date > today && date <= weekEnd);
   }).length;
-  const missingNext = current.projects.filter((project) => !project.detail?.trim()).length;
+  const missingNext = current.projects.filter((project) => !(project.nextAction ?? project.detail)?.trim()
+    && !tasks.some((task) => task.scope === "project" && task.path === project.path)).length;
   return { overdue, dueToday, upcoming, missingNext };
 }
 
 export function buildHeroMetrics(context: HeroCopyContext): HeroMetric[] {
   return [
     { label: "逾期任务", value: context.overdue, note: "overdue", tone: "danger" },
-    { label: "今天到期", value: context.dueToday, note: "due today", tone: "accent" },
+    { label: "今日待办", value: context.dueToday, note: "today", tone: "accent" },
     { label: "未来 7 天", value: context.upcoming, note: "upcoming", tone: "normal" },
     { label: "缺少下一步", value: context.missingNext, note: "next action", tone: context.missingNext ? "danger" : "normal" }
   ];
