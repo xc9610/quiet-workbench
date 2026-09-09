@@ -85,8 +85,8 @@
   export let controller: WorkbenchController;
 
   type DialogKind = "note" | "entity" | "task" | "task-edit" | "schedule" | "migrate" | "knowledge" | "yolo-preview" | null;
-  const UI_VERSION = "0.8.11";
-  const DEFAULT_NOTE_FOLDER = DEFAULT_PROJECT_NOTE_FOLDER;
+  const UI_VERSION = "0.8.12";
+  const DEFAULT_NOTE_FOLDER = controller.settings.solutionAssetsFolder || DEFAULT_PROJECT_NOTE_FOLDER;
 
   interface EntityDraft {
     kind: Exclude<EntityKind, "knowledge">;
@@ -2112,6 +2112,7 @@
   <div class="qwb-modal-backdrop" role="presentation" on:click={(event) => event.currentTarget === event.target && (showWidgetLibrary = false)}>
     <div class="qwb-modal qwb-widget-library" role="dialog" aria-modal="true" aria-labelledby="qwb-widget-library-title">
       <header><div><span class="qwb-eyebrow">COMPONENT LIBRARY</span><h2 id="qwb-widget-library-title">{selectedWidgetType ? `配置${BUILTIN_WIDGETS.find((widget) => widget.id === selectedWidgetType)?.title ?? "组件"}` : "选择组件类型"}</h2></div><button aria-label="关闭" on:click={() => (showWidgetLibrary = false)}>×</button></header>
+      <div class="qwb-modal-body">
       {#if !selectedWidgetType}
         <input class="qwb-library-search" bind:value={widgetLibrarySearch} placeholder="搜索列表、看板、日历等组件类型" />
         <nav class="qwb-library-packs"><button class:active={widgetLibraryPack === "all"} on:click={() => (widgetLibraryPack = "all")}>全部</button><button class:active={widgetLibraryPack === "view"} on:click={() => (widgetLibraryPack = "view")}>视图</button><button class:active={widgetLibraryPack === "control"} on:click={() => (widgetLibraryPack = "control")}>控制</button><button class:active={widgetLibraryPack === "capture"} on:click={() => (widgetLibraryPack = "capture")}>记录</button></nav>
@@ -2131,6 +2132,7 @@
         </div>
       {/if}
       <p class="qwb-library-note">同一种组件可以重复添加；每个实例的筛选、数据范围和尺寸分别保存。</p>
+      </div>
     </div>
   </div>
 {/if}
@@ -2139,6 +2141,7 @@
   <div class="qwb-modal-backdrop" role="presentation" on:click={(event) => event.currentTarget === event.target && (editingWidget = undefined)}>
     <div class="qwb-modal qwb-widget-settings" role="dialog" aria-modal="true" aria-labelledby="qwb-widget-settings-title">
       <header><div><span class="qwb-eyebrow">WIDGET INSTANCE</span><h2 id="qwb-widget-settings-title">{widgetTitle(editingWidget)}设置</h2></div><button aria-label="关闭" on:click={() => (editingWidget = undefined)}>×</button></header>
+      <div class="qwb-modal-body qwb-dialog-form">
       <label>组件名称<input bind:value={editingTitle} placeholder="例如：客户 A 待跟进" /></label>
       <fieldset class="qwb-widget-size-editor">
         <legend>组件尺寸</legend>
@@ -2175,6 +2178,7 @@
         <p class="qwb-empty">这个组件当前没有实例级筛选设置。</p>
       {/if}
       <div class="qwb-modal-actions"><button class="qwb-button qwb-danger-button" on:click={() => run(async () => { await removeWidget(editingWidget!); editingWidget = undefined; }, "组件已移除")}>移除组件</button><span></span><button class="qwb-button qwb-button-subtle" on:click={() => (editingWidget = undefined)}>取消</button><button class="qwb-button qwb-button-primary" on:click={() => run(saveWidgetSettings, "组件设置已保存")}>保存</button></div>
+      </div>
     </div>
   </div>
 {/if}
@@ -2183,11 +2187,12 @@
   <div class="qwb-modal-backdrop" role="presentation" on:click={(event) => event.currentTarget === event.target && (dialog = null)}>
     <div class="qwb-modal" class:qwb-note-modal={dialog === "note"} role="dialog" aria-modal="true" aria-labelledby="qwb-dialog-title">
       <header><div><span class="qwb-eyebrow">{dialog === "note" ? "PROJECT NOTE" : "SAFE WORKFLOW"}</span><h2 id="qwb-dialog-title">{dialogTitle(dialog)}</h2>{#if dialog === "note"}<p>把方案过程、关键判断和下一步沉淀到项目上下文中。</p>{/if}</div><button aria-label="关闭" on:click={() => (dialog = null)}>×</button></header>
+      <div class="qwb-modal-body" class:qwb-dialog-form={dialog !== "note"}>
       {#if !controller.settings.writesEnabled}
         <div class="qwb-inline-warning">写入尚未启用。请先在插件设置中阅读说明并确认。</div>
       {/if}
       {#if dialog === "note"}
-        <form class="qwb-note-form" on:submit|preventDefault={submitNote}>
+        <form class="qwb-dialog-form qwb-note-form" on:submit|preventDefault={submitNote}>
           <section class="qwb-note-section">
             <div class="qwb-note-section-heading"><div><h3>笔记内容</h3><p>标题用于检索，正文可以先记录最小必要信息。</p></div><span>必填</span></div>
             <label class="qwb-note-title-field">标题<input bind:this={noteTitleInput} bind:value={noteTitle} placeholder="例如：XX 项目热控方案讨论" /></label>
@@ -2262,6 +2267,7 @@
         <textarea class="qwb-yolo-preview" rows="14" readonly value={yoloPrompt}></textarea>
         <div class="qwb-modal-actions"><button class="qwb-button qwb-button-subtle" on:click={() => (dialog = null)}>取消</button><button class="qwb-button qwb-button-primary" disabled={busy} on:click={() => run(confirmYolo, "提示词已复制并打开 YOLO")}>复制并打开 YOLO</button></div>
       {/if}
+      </div>
     </div>
   </div>
 {/if}

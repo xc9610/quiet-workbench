@@ -12,6 +12,7 @@ export interface QuietWorkbenchSettings {
   clientFolder: string;
   meetingFolder: string;
   supplierFolder: string;
+  solutionAssetsFolder: string;
   knowledgeFolder: string;
   formalKnowledgeFolder: string;
   knowledgeTemplate: string;
@@ -40,6 +41,7 @@ export const DEFAULT_SETTINGS: QuietWorkbenchSettings = {
   clientFolder: "10_业务_Business/01_客户_Clients",
   meetingFolder: "10_业务_Business/03_会议_Meetings",
   supplierFolder: "10_业务_Business/08_供应商_Suppliers",
+  solutionAssetsFolder: "10_业务_Business/04_方案资产_SolutionAssets",
   knowledgeFolder: "20_技术_Technology",
   formalKnowledgeFolder: "20_技术_Technology/90_待整理_Inbox",
   knowledgeTemplate: "",

@@ -18,7 +18,8 @@ describe("DiagnosticService", () => {
     const adapter = reader();
     const report = await new DiagnosticService(adapter).run(DEFAULT_SETTINGS);
     expect(report.readOnly).toBe(true);
-    expect(report.items.filter((item) => item.category === "folder")).toHaveLength(5);
+    expect(report.items.filter((item) => item.category === "folder")).toHaveLength(6);
+    expect(report.items.find((item) => item.id === "folder.solution-assets")?.status).toBe("pass");
     expect(report.items.filter((item) => item.category === "template")).toHaveLength(4);
     expect(report.items.filter((item) => item.category === "optional-plugin")).toHaveLength(4);
     expect(report.items.find((item) => item.id === "alias.organization_type")?.status).toBe("pass");

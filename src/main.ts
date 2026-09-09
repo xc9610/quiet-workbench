@@ -491,7 +491,14 @@ class PluginWorkbenchController implements WorkbenchController {
     const project = this.current.projects.find((entry) => entry.path === projectPath);
     if (!project) throw new Error("项目不在当前索引中，请先刷新后重试。");
     const today = formatDate(new Date(), "YYYY-MM-DD");
-    const evidence = buildProjectReviewEvidence(project, this.current.tasks, this.current.meetings, today);
+    const evidence = buildProjectReviewEvidence(
+      project,
+      this.current.tasks,
+      this.current.meetings,
+      today,
+      Date.now(),
+      this.current.knowledge
+    );
     const prompt = `${buildProjectReviewAiPrompt(evidence, today)}\n\n${serializeProjectReviewEvidence(evidence, today)}`;
     try {
       if (!navigator.clipboard?.writeText) throw new Error("clipboard unavailable");
@@ -614,6 +621,7 @@ class PluginWorkbenchController implements WorkbenchController {
         { kind: "client", folder: settings.clientFolder, typeValues: ["client", "客户"], aliases: settings.clientAliases },
         { kind: "meeting", folder: settings.meetingFolder, typeValues: ["meeting", "会议", "会议纪要"] },
         { kind: "supplier", folder: settings.supplierFolder, typeValues: ["supplier", "供应商"] },
+        { kind: "knowledge", folder: settings.solutionAssetsFolder, typeValues: ["项目文件", "方案", "方案资产", "note"], allowUntyped: true, acceptAllTypes: true },
         { kind: "knowledge", folder: settings.knowledgeFolder, typeValues: ["knowledge", "note", "知识"], allowUntyped: true, acceptAllTypes: true }
       ]
     });
@@ -626,6 +634,7 @@ class PluginWorkbenchController implements WorkbenchController {
       clientFolder: settings.clientFolder,
       meetingFolder: settings.meetingFolder,
       supplierFolder: settings.supplierFolder,
+      solutionAssetsFolder: settings.solutionAssetsFolder,
       knowledgeFolder: settings.knowledgeFolder,
       clientAliases: settings.clientAliases
     });

@@ -1460,16 +1460,19 @@
   inset: 0;
   display: grid;
   padding: 20px;
+  overflow: hidden;
   place-items: center;
   background: rgb(0 0 0 / 42%);
   backdrop-filter: blur(3px);
 }
 
 .qwb-modal {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   width: min(500px, 100%);
-  max-height: min(720px, 90vh);
-  padding: 20px;
-  overflow: auto;
+  max-height: min(760px, calc(100dvh - 40px));
+  padding: 0;
+  overflow: hidden;
   border: 1px solid var(--qwb-border);
   border-radius: 16px;
   background: var(--background-primary);
@@ -1478,8 +1481,8 @@
 
 .qwb-modal.qwb-note-modal {
   width: min(620px, 100%);
-  padding: 0;
-  overflow: visible;
+  max-height: min(820px, calc(100dvh - 40px));
+  overflow: hidden;
   border-color: color-mix(in srgb, var(--interactive-accent) 20%, var(--qwb-border));
 }
 
@@ -1512,9 +1515,29 @@
 }
 
 .qwb-note-form {
-  max-height: min(680px, calc(90vh - 92px));
   padding: 18px 24px 22px;
+}
+
+.qwb-modal-body {
+  min-width: 0;
+  min-height: 0;
+  padding: 18px 20px 20px;
+  overflow-x: hidden;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.qwb-note-modal > .qwb-modal-body {
+  padding: 0;
+}
+
+.qwb-dialog-form {
+  display: block;
+}
+
+.qwb-dialog-form > * {
+  min-width: 0;
 }
 
 .qwb-note-section {
@@ -1674,7 +1697,11 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  margin-bottom: 17px;
+  gap: 18px;
+  margin: 0;
+  padding: 19px 20px 17px;
+  border-bottom: 1px solid var(--qwb-border);
+  background: linear-gradient(145deg, color-mix(in srgb, var(--interactive-accent) 6%, transparent), transparent 64%);
 }
 
 .qwb-modal h2 {
@@ -1689,7 +1716,8 @@
   font-size: 22px;
 }
 
-.qwb-modal > label,
+.qwb-modal-body > label,
+.qwb-dialog-form > label,
 .qwb-form-row label {
   display: grid;
   gap: 6px;
@@ -1703,9 +1731,17 @@
 .qwb-modal select,
 .qwb-modal textarea {
   width: 100%;
-  min-height: 38px;
+  min-width: 0;
+  min-height: 42px;
+  box-sizing: border-box;
   color: var(--text-normal);
-  font-size: 12px;
+  font-size: 13px;
+}
+
+.qwb-modal textarea {
+  padding: 10px 11px;
+  line-height: 1.55;
+  resize: vertical;
 }
 
 .qwb-form-row {
@@ -1722,8 +1758,16 @@
 }
 
 .qwb-modal-actions {
+  flex-wrap: wrap;
   justify-content: flex-end;
   margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--qwb-border);
+}
+
+.qwb-modal-actions .qwb-button {
+  min-height: 40px;
+  padding-inline: 14px;
 }
 
 .qwb-context {
@@ -1958,19 +2002,26 @@
     gap: 0;
   }
 
-  .qwb-modal-backdrop { padding: 10px; }
+  .qwb-modal-backdrop { padding: 8px; }
+
+  .qwb-modal {
+    width: 100%;
+    max-height: calc(100dvh - 16px);
+  }
 
   .qwb-modal.qwb-note-modal {
-    max-height: 94vh;
-    overflow: hidden;
+    max-height: calc(100dvh - 16px);
   }
 
   .qwb-note-modal > header { padding: 18px; }
 
   .qwb-note-form {
-    max-height: calc(94vh - 88px);
     padding: 14px 16px 18px;
   }
+
+  .qwb-modal-body { padding: 14px 16px 16px; }
+
+  .qwb-note-modal > .qwb-modal-body { padding: 0; }
 
   .qwb-note-section { padding: 14px; }
 

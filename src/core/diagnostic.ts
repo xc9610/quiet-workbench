@@ -44,6 +44,7 @@ export class DiagnosticService {
       ["client", "客户目录", settings.clientFolder],
       ["meeting", "会议目录", settings.meetingFolder],
       ["supplier", "供应商目录", settings.supplierFolder],
+      ["solution-assets", "方案资产目录", settings.solutionAssetsFolder],
       ["knowledge", "知识目录", settings.knowledgeFolder]
     ] as const;
     for (const [id, title, path] of folders) {

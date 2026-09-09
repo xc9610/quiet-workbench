@@ -169,6 +169,7 @@ export class QuietWorkbenchSettingTab extends PluginSettingTab {
     this.addPathSetting(containerEl, "客户目录", "clientFolder");
     this.addPathSetting(containerEl, "会议目录", "meetingFolder");
     this.addPathSetting(containerEl, "供应商目录", "supplierFolder");
+    this.addPathSetting(containerEl, "方案资产目录", "solutionAssetsFolder");
     this.addPathSetting(containerEl, "知识目录", "knowledgeFolder");
     this.addPathSetting(containerEl, "正式知识目录", "formalKnowledgeFolder");
 
@@ -320,7 +321,7 @@ export class QuietWorkbenchSettingTab extends PluginSettingTab {
     });
   }
 
-  private addPathSetting(container: HTMLElement, label: string, key: "projectFolder" | "clientFolder" | "meetingFolder" | "supplierFolder" | "knowledgeFolder" | "formalKnowledgeFolder"): void {
+  private addPathSetting(container: HTMLElement, label: string, key: "projectFolder" | "clientFolder" | "meetingFolder" | "supplierFolder" | "solutionAssetsFolder" | "knowledgeFolder" | "formalKnowledgeFolder"): void {
     new Setting(container)
       .setName(label)
       .setDesc("相对于 Vault 根目录；保存时会规范化路径。")

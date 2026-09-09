@@ -13,7 +13,7 @@ export class ProjectReviewService {
     const path = normalizeVaultPath(input.projectPath);
     const before = await this.vault.read(path);
     const date = localDate(now);
-    const status = input.status?.trim() || projectStatusForDecision(input.decision);
+    const status = projectStatusForDecision(input.decision);
     let after = setFrontmatterFields(before, {
       status,
       phase: input.phase?.trim() || undefined,

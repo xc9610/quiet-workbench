@@ -4,8 +4,6 @@ import { calculateProjectHealth, dateAfter, effectiveTaskDate, isWaitingTask, ty
 
 export type ProjectReviewDecision = "已通过" | "附条件通过" | "暂缓" | "停止";
 
-export const PROJECT_REVIEW_STATUSES = ["推进中", "暂停", "已完成", "归档"] as const;
-
 // Keep the stored key as `phase` for compatibility, while presenting one
 // thermal-control development vocabulary everywhere the review flow edits it.
 export const PROJECT_DEVELOPMENT_STAGES = [
@@ -25,7 +23,6 @@ export interface ProjectReviewTaskInput {
 export interface ProjectReviewInput {
   projectPath: string;
   decision: ProjectReviewDecision;
-  status?: string;
   phase?: string;
   nextAction?: string;
   reviewDue?: string;
@@ -41,6 +38,7 @@ export interface ProjectReviewEvidence {
   upcomingTasks: TaskRecord[];
   waitingTasks: TaskRecord[];
   meetings: EntitySummary[];
+  assets: EntitySummary[];
   health: ProjectHealthResult;
   triggers: string[];
 }
@@ -85,6 +83,10 @@ export function serializeProjectReviewEvidence(evidence: ProjectReviewEvidence, 
   lines.push(...(evidence.meetings.length > 0
     ? evidence.meetings.slice(0, 8).map((meeting) => `- ${meeting.name}｜${meeting.path}｜${meeting.detail || meeting.related || "未填写摘要"}`)
     : ["- 无已索引的关联会议"]));
+  lines.push("", "## 关联方案与资料");
+  lines.push(...(evidence.assets.length > 0
+    ? evidence.assets.slice(0, 12).map((asset) => `- ${asset.name}｜${asset.path}｜${asset.detail || asset.related || "项目关联资料"}`)
+    : ["- 无已索引的关联方案或资料"]));
   return lines.join("\n");
 }
 
@@ -130,7 +132,8 @@ export function buildProjectReviewEvidence(
   allTasks: readonly TaskRecord[],
   allMeetings: readonly EntitySummary[],
   today: string,
-  now = Date.now()
+  now = Date.now(),
+  allAssets: readonly EntitySummary[] = []
 ): ProjectReviewEvidence {
   const tasks = allTasks.filter((task) => task.scope === "project" && task.path === project.path);
   const openTasks = tasks.filter((task) => !task.completed);
@@ -147,6 +150,9 @@ export function buildProjectReviewEvidence(
   const meetings = allMeetings
     .filter((meeting) => entitySummaryReferencesProject(meeting, project))
     .sort((left, right) => (right.updatedAt ?? 0) - (left.updatedAt ?? 0));
+  const assets = allAssets
+    .filter((asset) => entitySummaryReferencesProject(asset, project))
+    .sort((left, right) => (right.updatedAt ?? 0) - (left.updatedAt ?? 0));
   return {
     project,
     tasks,
@@ -155,6 +161,7 @@ export function buildProjectReviewEvidence(
     upcomingTasks,
     waitingTasks,
     meetings,
+    assets,
     // Project review deliberately ignores the project-level due field. Dates live on
     // executable tasks or review_due, so an old project due cannot distort health.
     health: calculateProjectHealth({ ...project, due: undefined }, tasks, today, now),

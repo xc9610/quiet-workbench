@@ -105,13 +105,19 @@ describe("project review evidence", () => {
         { kind: "meeting", name: "设计评审会", path: "meetings/review.md", project: "[[热控设计]]" },
         { kind: "meeting", name: "其他会议", path: "meetings/other.md", project: "[[其他项目]]" }
       ],
-      "2026-08-29"
+      "2026-08-29",
+      Date.UTC(2026, 7, 29),
+      [
+        { kind: "knowledge", name: "热控方案说明", path: "assets/热控方案说明.md", project: "[[projects/热控设计]]" },
+        { kind: "knowledge", name: "其他方案", path: "assets/其他方案.md", project: "[[其他项目]]" }
+      ]
     );
     expect(evidence.tasks).toHaveLength(2);
     expect(evidence.overdueTasks.map((entry) => entry.id)).toEqual(["late"]);
     expect(evidence.upcomingTasks.map((entry) => entry.id)).toEqual(["soon"]);
     expect(evidence.waitingTasks.map((entry) => entry.id)).toEqual(["soon"]);
     expect(evidence.meetings.map((entry) => entry.name)).toEqual(["设计评审会"]);
+    expect(evidence.assets.map((entry) => entry.name)).toEqual(["热控方案说明"]);
     expect(evidence.health.reasons).not.toContain("项目目标日期已过");
   });
 
@@ -120,7 +126,9 @@ describe("project review evidence", () => {
       project({ client: "晨星实验室", due: "2026-08-28", nextAction: "补齐试验数据" }),
       [task({ due: "2026-08-28", priority: "high" })],
       [{ kind: "meeting", name: "设计评审会", path: "meetings/review.md", project: "[[热控设计]]" }],
-      "2026-08-29"
+      "2026-08-29",
+      Date.UTC(2026, 7, 29),
+      [{ kind: "knowledge", name: "热控方案说明", path: "assets/热控方案说明.md", project: "[[projects/热控设计]]" }]
     );
     const prompt = buildProjectReviewAiPrompt(evidence, "2026-08-29");
     const payload = serializeProjectReviewEvidence(evidence, "2026-08-29");
@@ -132,6 +140,8 @@ describe("project review evidence", () => {
     expect(payload).not.toContain("截止日期");
     expect(payload).toContain("完成接口评审｜2026-08-28｜high");
     expect(payload).toContain("设计评审会｜meetings/review.md");
+    expect(payload).toContain("## 关联方案与资料");
+    expect(payload).toContain("热控方案说明｜assets/热控方案说明.md");
   });
 });
 

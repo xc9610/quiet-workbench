@@ -4,12 +4,12 @@
   import {
     buildProjectReviewEvidence,
     PROJECT_DEVELOPMENT_STAGES,
-    PROJECT_REVIEW_STATUSES,
     projectReviewCandidates,
     projectReviewTriggers,
     projectStatusForDecision,
     type ProjectReviewDecision
   } from "../domain/project-review";
+  import type { TaskRecord } from "../core/types";
   import { effectiveTaskDate } from "../domain/widget-data";
   import { formatDate } from "../services/template-service";
   import { EMPTY_SNAPSHOT, type EntitySummary, type WorkbenchController, type WorkbenchSnapshot } from "../ui/controller";
@@ -29,13 +29,16 @@
   let reviewed = new Set<string>();
   let queueOrder: string[] = [];
   let decision: ProjectReviewDecision | "" = "";
-  let status = "";
   let phase = "";
   let nextAction = "";
   let reviewDue = "";
   let note = "";
   let taskText = "";
   let taskDue = "";
+  let editingTaskId = "";
+  let taskEditDue = "";
+  let taskEditPriority: NonNullable<TaskRecord["priority"]> = "normal";
+  let taskBusyId = "";
   let busy = false;
   let message = "";
   let messageTone: "ok" | "error" = "ok";
@@ -55,14 +58,14 @@
     ? snapshot.projects.find((project) => project.path === selectedPath)
     : queue[0] ?? candidates[0] ?? (query ? visibleProjects[0] : undefined);
   $: if (selected && selectedPath !== selected.path) selectProject(selected.path);
-  $: evidence = selected ? buildProjectReviewEvidence(selected, snapshot.tasks, snapshot.meetings, today) : undefined;
+  $: evidence = selected
+    ? buildProjectReviewEvidence(selected, snapshot.tasks, snapshot.meetings, today, Date.now(), snapshot.knowledge)
+    : undefined;
   $: totalCandidateCount = candidatePaths.length;
   $: pendingCount = candidatePaths.filter((path) => !reviewed.has(path)).length;
   $: reviewDueRequired = decision === "附条件通过";
-  $: canSave = Boolean(selected && decision && status.trim() && (!reviewDueRequired || reviewDue));
-  $: statusOptions = PROJECT_REVIEW_STATUSES.includes(status as typeof PROJECT_REVIEW_STATUSES[number])
-    ? [...PROJECT_REVIEW_STATUSES]
-    : [status, ...PROJECT_REVIEW_STATUSES].filter(Boolean);
+  $: canSave = Boolean(selected && decision && (!reviewDueRequired || reviewDue));
+  $: mappedStatus = decision ? projectStatusForDecision(decision) : selected?.status || "未设置";
   $: phaseOptions = PROJECT_DEVELOPMENT_STAGES.includes(phase as typeof PROJECT_DEVELOPMENT_STAGES[number])
     ? [...PROJECT_DEVELOPMENT_STAGES]
     : [phase, ...PROJECT_DEVELOPMENT_STAGES].filter(Boolean);
@@ -81,13 +84,13 @@
     selectedPath = path;
     const project = snapshot.projects.find((entry) => entry.path === path);
     decision = reviewDecision(project?.reviewStatus);
-    status = decision ? projectStatusForDecision(decision) : project?.status || "";
     phase = project?.phase ?? "";
     nextAction = project?.nextAction ?? "";
     reviewDue = project?.reviewDue ?? "";
     note = project?.reviewNote ?? "";
     taskText = "";
     taskDue = "";
+    editingTaskId = "";
     message = "";
   }
 
@@ -121,8 +124,47 @@
 
   function chooseDecision(value: ProjectReviewDecision): void {
     decision = value;
-    status = projectStatusForDecision(value);
     if (value === "已通过" || value === "停止") reviewDue = "";
+  }
+
+  function beginTaskUpdate(task: TaskRecord): void {
+    editingTaskId = editingTaskId === task.id ? "" : task.id;
+    taskEditDue = task.due ?? "";
+    taskEditPriority = task.priority ?? "normal";
+  }
+
+  async function toggleTask(task: TaskRecord): Promise<void> {
+    if (taskBusyId || task.scope === "meeting-draft") return;
+    taskBusyId = task.id;
+    message = "";
+    try {
+      await controller.updateTask(task, { completed: !task.completed });
+      messageTone = "ok";
+      message = task.completed ? "任务已重新打开。" : "任务已标记完成。";
+      editingTaskId = "";
+    } catch (error) {
+      messageTone = "error";
+      message = error instanceof Error ? error.message : String(error);
+    } finally {
+      taskBusyId = "";
+    }
+  }
+
+  async function saveTaskUpdate(task: TaskRecord): Promise<void> {
+    if (taskBusyId) return;
+    taskBusyId = task.id;
+    message = "";
+    try {
+      await controller.updateTask(task, { due: taskEditDue || null, priority: taskEditPriority });
+      messageTone = "ok";
+      message = "任务日期和优先级已更新。";
+      editingTaskId = "";
+    } catch (error) {
+      messageTone = "error";
+      message = error instanceof Error ? error.message : String(error);
+    } finally {
+      taskBusyId = "";
+    }
   }
 
   function advance(markReviewed: boolean): void {
@@ -142,7 +184,6 @@
       await controller.saveProjectReview({
         projectPath: selected.path,
         decision,
-        status: status.trim(),
         phase: phase.trim() || undefined,
         nextAction: nextAction.trim() || undefined,
         reviewDue: reviewDue || undefined,
@@ -281,8 +322,12 @@
               <button type="button" class:active={decision === option.value} aria-pressed={decision === option.value} on:click={() => chooseDecision(option.value)}><span>{option.label}</span><small>{option.hint}</small></button>
             {/each}
           </fieldset>
+          <div class="status-sync" aria-live="polite">
+            <span use:obsidianIcon={"refresh-cw"}></span>
+            <div><small>项目状态自动联动</small><strong>{selected.status || "未设置"} → {mappedStatus}</strong></div>
+            <em>无需重复选择</em>
+          </div>
           <div class="project-update-fields">
-            <label><span>项目状态</span><select bind:value={status}>{#each statusOptions as option}<option value={option}>{option}</option>{/each}</select></label>
             <label><span>研制阶段</span><select bind:value={phase} aria-label="研制阶段"><option value="">未设置</option>{#each phaseOptions as option}<option value={option}>{phaseOptionLabel(option)}</option>{/each}</select></label>
             <label class="next-action-field"><span>下一步</span><input bind:value={nextAction} placeholder="项目层面的明确下一步" /></label>
           </div>
@@ -299,7 +344,7 @@
           </div>
           <div class="write-summary" aria-live="polite">
             <span use:obsidianIcon={"file-check-2"}></span>
-            <div><strong>{decision ? `保存后：${decision} → ${status || "未设置状态"}` : "请先选择审阅结论"}</strong><small>{phase ? `研制阶段：${phase}` : "研制阶段：未设置"} · {nextAction ? `下一步：${nextAction}` : "下一步：未设置"}{taskText ? " · 新增 1 条任务" : ""}</small></div>
+            <div><strong>{decision ? `保存后：${decision}，项目状态更新为${mappedStatus}` : "请先选择审阅结论"}</strong><small>{phase ? `研制阶段：${phase}` : "研制阶段：未设置"} · {nextAction ? `下一步：${nextAction}` : "下一步：未设置"}{taskText ? " · 新增 1 条任务" : ""}</small></div>
           </div>
           <footer><button type="button" on:click={() => advance(false)}>跳过</button><button class="primary" disabled={busy || !controller.settings.writesEnabled || !canSave} on:click={saveReview}>{busy ? "保存中…" : "保存并审下一个"}</button></footer>
         </section>
@@ -325,10 +370,24 @@
           </article>
 
           <article class="review-card task-evidence">
-            <header><span use:obsidianIcon={"list-checks"}></span><div><h3>关键任务</h3><small>逾期与近期节点优先</small></div><b>{evidence.openTasks.length}</b></header>
+            <header><span use:obsidianIcon={"list-checks"}></span><div><h3>关键任务</h3><small>可直接完成、改期或调整优先级</small></div><b>{evidence.openTasks.length}</b></header>
             <div class="evidence-list">
               {#each [...evidence.overdueTasks, ...evidence.upcomingTasks, ...evidence.openTasks.filter((task) => !evidence.overdueTasks.includes(task) && !evidence.upcomingTasks.includes(task))].slice(0, 6) as task (task.id)}
-                <button on:click={() => controller.openPath(task.path)}><i class:overdue={Boolean(effectiveTaskDate(task) && effectiveTaskDate(task)! < today)}></i><span><strong>{task.text}</strong><small>{task.sourceName}</small></span><time>{scopeDate(task)}</time></button>
+                <div class="task-evidence-item">
+                  <div class="task-evidence-row">
+                    <button class="task-complete" aria-label={`完成任务：${task.text}`} title="标记完成" disabled={Boolean(taskBusyId) || !controller.settings.writesEnabled} on:click={() => toggleTask(task)}><span use:obsidianIcon={taskBusyId === task.id ? "loader-circle" : "circle"} class:spinning={taskBusyId === task.id}></span></button>
+                    <button class="task-open" on:click={() => controller.openPath(task.path)}><i class:overdue={Boolean(effectiveTaskDate(task) && effectiveTaskDate(task)! < today)}></i><span><strong>{task.text}</strong><small>{task.sourceName}</small></span></button>
+                    <time class:overdue={Boolean(effectiveTaskDate(task) && effectiveTaskDate(task)! < today)}>{scopeDate(task)}</time>
+                    <button class="task-adjust" aria-expanded={editingTaskId === task.id} on:click={() => beginTaskUpdate(task)}>{editingTaskId === task.id ? "收起" : "调整"}</button>
+                  </div>
+                  {#if editingTaskId === task.id}
+                    <div class="task-quick-editor">
+                      <label><span>截止日期</span><input type="date" bind:value={taskEditDue} /></label>
+                      <label><span>优先级</span><select bind:value={taskEditPriority}><option value="highest">最高</option><option value="high">高</option><option value="normal">普通</option><option value="low">低</option><option value="lowest">最低</option></select></label>
+                      <button class="task-save" disabled={taskBusyId === task.id || !controller.settings.writesEnabled} on:click={() => saveTaskUpdate(task)}>保存调整</button>
+                    </div>
+                  {/if}
+                </div>
               {:else}<p class="empty-text">项目页没有未完成任务。</p>{/each}
             </div>
           </article>
@@ -339,6 +398,15 @@
               {#each evidence.meetings.slice(0, 6) as meeting (meeting.path)}
                 <button on:click={() => controller.openPath(meeting.path)}><span class="meeting-mark" use:obsidianIcon={"messages-square"}></span><span><strong>{meeting.name}</strong><small>{meeting.detail || meeting.related || "关联会议"}</small></span><time>{localDateTime(meeting.updatedAt)}</time></button>
               {:else}<p class="empty-text">没有索引到关联会议。</p>{/each}
+            </div>
+          </article>
+
+          <article class="review-card asset-evidence">
+            <header><span use:obsidianIcon={"notebook-tabs"}></span><div><h3>方案与资料</h3><small>方案资产中明确关联本项目的记录</small></div><b>{evidence.assets.length}</b></header>
+            <div class="evidence-list">
+              {#each evidence.assets.slice(0, 6) as asset (asset.path)}
+                <button on:click={() => controller.openPath(asset.path)}><span class="meeting-mark" use:obsidianIcon={"file-text"}></span><span><strong>{asset.name}</strong><small>{asset.detail || asset.related || "项目关联资料"}</small></span><time>{localDateTime(asset.updatedAt)}</time></button>
+              {:else}<p class="empty-text">没有索引到关联方案或资料。</p>{/each}
             </div>
           </article>
         </section>
@@ -433,9 +501,9 @@
   .metric-grid span { color: var(--text-muted); font-size: 10px; }
   .metric-grid div.risk strong { color: var(--color-red); }
   .evidence-list { display: grid; gap: 6px; }
-  .evidence-list button { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; width: 100%; height: auto !important; min-height: 52px !important; padding: 9px 10px !important; overflow: hidden; border: 1px solid var(--review-line); border-radius: 10px; background: var(--background-primary); text-align: left; cursor: pointer; }
-  .evidence-list button > i:not(.meeting-mark) { width: 8px; height: 8px; border-radius: 50%; background: var(--color-blue); }
-  .evidence-list button > i.overdue { background: var(--color-red); }
+  .evidence-list > button { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; width: 100%; height: auto !important; min-height: 52px !important; padding: 9px 10px !important; overflow: hidden; border: 1px solid var(--review-line); border-radius: 10px; background: var(--background-primary); text-align: left; cursor: pointer; }
+  .evidence-list .task-open > i:not(.meeting-mark) { width: 8px; height: 8px; border-radius: 50%; background: var(--color-blue); }
+  .evidence-list .task-open > i.overdue { background: var(--color-red); }
   .meeting-mark { width: 17px; height: 17px; color: var(--text-accent); }
   .evidence-list button span { min-width: 0; }
   .evidence-list strong, .evidence-list small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -451,6 +519,12 @@
   .decision-options button.active { border-color: var(--review-accent); background: color-mix(in srgb, var(--review-accent) 6%, var(--background-primary)); }
   .decision-options span { font-weight: 800; }
   .decision-options small { color: var(--text-muted); font-size: 10px; }
+  .status-sync { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; margin-top: 12px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--review-accent) 28%, var(--review-line)); border-radius: 11px; background: color-mix(in srgb, var(--review-accent) 5%, var(--background-primary)); }
+  .status-sync > span { width: 18px; height: 18px; color: var(--text-accent); }
+  .status-sync small, .status-sync strong { display: block; }
+  .status-sync small { color: var(--text-muted); font-size: 10px; }
+  .status-sync strong { margin-top: 2px; font-size: 12px; overflow-wrap: anywhere; }
+  .status-sync em { color: var(--text-accent); font-size: 10px; font-style: normal; font-weight: 700; }
   .decision-fields { display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 10px; margin-top: 12px; }
   .decision-fields label { display: grid; gap: 5px; color: var(--text-muted); font-size: 10px; font-weight: 700; }
   .decision-fields input { width: 100%; min-height: 40px; box-sizing: border-box; color: var(--text-normal); }
@@ -593,7 +667,7 @@
   .metric-grid div { min-height: 70px; border-radius: 10px; }
   .metric-grid strong { font-size: 22px; }
   .evidence-list { gap: 5px; }
-  .evidence-list button { min-height: 49px !important; padding: 8px 9px !important; }
+  .evidence-list > button { min-height: 49px !important; padding: 8px 9px !important; }
   .evidence-list strong, .evidence-list small { min-width: 0; }
   .decision-card { margin-top: 12px; padding: 18px; }
   .decision-options { margin-top: 13px; }
@@ -662,7 +736,7 @@
   }
   .project-update-fields {
     display: grid;
-    grid-template-columns: minmax(140px, 170px) minmax(160px, 190px) minmax(240px, 1fr);
+    grid-template-columns: minmax(160px, 210px) minmax(240px, 1fr);
     gap: 10px;
     margin-top: 12px;
   }
@@ -747,6 +821,21 @@
     border-top: 0;
   }
   .decision-card footer button.primary { min-width: 150px; }
+  .task-evidence-item { overflow: hidden; border: 1px solid var(--review-line); border-radius: 10px; background: var(--background-primary); }
+  .task-evidence-row { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto auto; align-items: center; gap: 6px; min-height: 52px; padding: 6px; }
+  .task-evidence-row button { height: auto !important; box-shadow: none !important; }
+  .task-complete, .task-adjust { min-width: 36px; min-height: 36px !important; padding: 0 8px !important; border: 0; border-radius: 8px; background: transparent; color: var(--text-muted); }
+  .task-complete { display: grid; place-items: center; padding: 0 !important; }
+  .task-complete span { width: 17px; height: 17px; }
+  .task-complete:hover, .task-adjust:hover { background: var(--background-modifier-hover); color: var(--text-normal); }
+  .task-open { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 9px; min-width: 0; min-height: 40px !important; padding: 4px 6px !important; overflow: hidden; border: 0; background: transparent; text-align: left; }
+  .task-evidence-row time { color: var(--text-muted); font-size: 10px; white-space: nowrap; }
+  .task-evidence-row time.overdue { color: var(--color-red); font-weight: 700; }
+  .task-adjust { font-size: 10px; font-weight: 700; }
+  .task-quick-editor { display: grid; grid-template-columns: minmax(150px, 1fr) minmax(120px, .7fr) auto; align-items: end; gap: 8px; padding: 10px; border-top: 1px solid var(--review-line); background: color-mix(in srgb, var(--background-secondary) 65%, var(--background-primary)); }
+  .task-quick-editor label { display: grid; gap: 5px; min-width: 0; color: var(--text-muted); font-size: 10px; font-weight: 700; }
+  .task-quick-editor input, .task-quick-editor select { width: 100%; min-width: 0; min-height: 38px; box-sizing: border-box; }
+  .task-save { min-height: 38px !important; padding: 0 12px !important; border: 1px solid var(--interactive-accent); border-radius: 9px; background: var(--interactive-accent); color: var(--text-on-accent); font-size: 11px; font-weight: 700; }
 
   @media (max-width: 1120px) {
     .project-update-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -762,6 +851,11 @@
     .next-action-field,
     .task-fields > div { grid-column: auto; }
     .decision-card > header { display: block; }
+    .task-evidence-row { grid-template-columns: 36px minmax(0, 1fr) auto; }
+    .task-evidence-row time { grid-column: 2; }
+    .task-adjust { grid-column: 3; grid-row: 1 / span 2; }
+    .task-quick-editor { grid-template-columns: 1fr 1fr; }
+    .task-save { grid-column: 1 / -1; }
   }
   @media (max-width: 480px) {
     .review-header { display: grid; }
@@ -770,5 +864,9 @@
     .decision-fields { grid-template-columns: 1fr; }
     .decision-note:only-child { grid-column: auto; }
     .decision-card footer button { min-height: 44px; }
+    .status-sync { grid-template-columns: auto minmax(0, 1fr); }
+    .status-sync em { grid-column: 2; }
+    .task-quick-editor { grid-template-columns: 1fr; }
+    .task-save { grid-column: auto; min-height: 44px !important; }
   }
 </style>
