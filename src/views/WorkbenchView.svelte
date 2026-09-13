@@ -12,6 +12,7 @@
   } from "../ui/controller";
   import { projectStatusLabel } from "../domain/project-status";
   import { reviewTaskTitle } from "../domain/project-review";
+  import { projectFolderForType, PROJECT_TYPES, type ProjectType } from "../domain/project-type";
   let focusExpanded = false;
   import { EMPTY_SNAPSHOT } from "../ui/controller";
   import { formatDate } from "../services/template-service";
@@ -88,12 +89,13 @@
   export let controller: WorkbenchController;
 
   type DialogKind = "note" | "entity" | "task" | "task-edit" | "schedule" | "migrate" | "knowledge" | "yolo-preview" | null;
-  const UI_VERSION = "0.8.13";
+  const UI_VERSION = "0.8.14";
   const DEFAULT_NOTE_FOLDER = controller.settings.solutionAssetsFolder || DEFAULT_PROJECT_NOTE_FOLDER;
 
   interface EntityDraft {
     kind: Exclude<EntityKind, "knowledge">;
     name: string;
+    projectType: ProjectType;
     relatedClient: string;
     relatedProject: string;
     date: string;
@@ -120,6 +122,7 @@
   let noteTitleInput: HTMLInputElement;
   let entityKind: Exclude<EntityKind, "knowledge"> = "project";
   let entityName = "";
+  let entityProjectType: ProjectType = "售前方案";
   let relatedClient = "";
   let relatedProject = "";
   let entityDate = formatDate(new Date(), "YYYY-MM-DD");
@@ -1097,12 +1100,13 @@
   }
 
   $: entityTargetFolder =(): string => {
-    return {
+    const baseFolder = {
       project: controller.settings.projectFolder,
       client: controller.settings.clientFolder,
       meeting: controller.settings.meetingFolder,
       supplier: controller.settings.supplierFolder
     }[entityKind];
+    return entityKind === "project" ? projectFolderForType(baseFolder, entityProjectType) : baseFolder;
   }
 
   function relationOptions(rows: readonly EntitySummary[], kindLabel: string): SearchableOption[] {
@@ -1265,6 +1269,7 @@
   function openCreate(kind: Exclude<EntityKind, "knowledge">, contextPath = "", contextKind: "project" | "client" = "project"): void {
     entityKind = kind;
     entityName = "";
+    entityProjectType = "售前方案";
     relatedClient = contextKind === "client" && (kind === "project" || kind === "meeting") ? contextPath : "";
     relatedProject = contextKind === "project" && kind === "meeting" ? contextPath : "";
     entityDate = formatDate(new Date(), "YYYY-MM-DD");
@@ -1310,6 +1315,7 @@
     entityStack = [...entityStack, {
       kind: entityKind,
       name: entityName,
+      projectType: entityProjectType,
       relatedClient,
       relatedProject,
       date: entityDate,
@@ -1318,6 +1324,7 @@
     }];
     entityKind = kind;
     entityName = "";
+    entityProjectType = "售前方案";
     relatedClient = "";
     relatedProject = "";
     entityStartTime = "";
@@ -1330,6 +1337,7 @@
     const result = await controller.previewEntity({
       kind: entityKind,
       name: entityName.trim(),
+      projectType: entityKind === "project" ? entityProjectType : undefined,
       relatedClient: relatedClient || undefined,
       relatedProject: relatedProject || undefined,
       date: entityDate || undefined,
@@ -1430,6 +1438,7 @@
     const input: CreateEntityInput = {
       kind: entityKind,
       name: entityName.trim(),
+      projectType: entityKind === "project" ? entityProjectType : undefined,
       relatedClient: relatedClient || undefined,
       relatedProject: relatedProject || undefined,
       date: entityDate || undefined,
@@ -1453,6 +1462,7 @@
       const childKind = entityKind;
       entityKind = parent.kind;
       entityName = parent.name;
+      entityProjectType = parent.projectType;
       relatedClient = childKind === "client" ? createdPath : parent.relatedClient;
       relatedProject = childKind === "project" ? createdPath : parent.relatedProject;
       entityDate = parent.date;
@@ -2249,7 +2259,7 @@
       {:else if dialog === "entity"}
         <label>类型<select bind:value={entityKind}><option value="project">项目</option><option value="client">客户</option><option value="meeting">会议</option><option value="supplier">供应商</option></select></label>
         <label>名称<input bind:value={entityName} placeholder="输入清晰、可检索的名称" /></label>
-        {#if entityKind === "project"}<SearchableSelect id="qwb-entity-client" label="关联客户" bind:value={relatedClient} options={clientOptions()} emptyLabel="暂不关联客户" /><button class="qwb-text-action" type="button" on:click={() => beginNestedEntity("client")}>＋ 没有客户？先创建客户</button>{/if}
+        {#if entityKind === "project"}<label>项目类型<select bind:value={entityProjectType}>{#each PROJECT_TYPES as projectType}<option value={projectType}>{projectType}</option>{/each}</select><small class="qwb-field-help">决定项目归类和默认保存目录；后续可在项目审阅中转换。</small></label><SearchableSelect id="qwb-entity-client" label="关联客户" bind:value={relatedClient} options={clientOptions()} emptyLabel="暂不关联客户" /><button class="qwb-text-action" type="button" on:click={() => beginNestedEntity("client")}>＋ 没有客户？先创建客户</button>{/if}
         {#if entityKind === "meeting"}<SearchableSelect id="qwb-entity-project" label="关联项目" bind:value={relatedProject} options={projectOptions()} emptyLabel="暂不关联项目" /><button class="qwb-text-action" type="button" on:click={() => beginNestedEntity("project")}>＋ 没有项目？先创建项目</button><SearchableSelect id="qwb-meeting-client" label="关联客户（可选）" bind:value={relatedClient} options={clientOptions()} emptyLabel="暂不关联客户" /><label>日期<input type="date" bind:value={entityDate} /></label><div class="qwb-form-row"><label>开始时间<input type="time" bind:value={entityStartTime} /></label><label>结束时间<input type="time" min={entityStartTime || undefined} bind:value={entityEndTime} /></label></div>{/if}
         <details class="qwb-save-location"><summary><span>保存位置</span><strong>{entityTargetFolder().split("/").pop()}</strong></summary><p>{entityTargetFolder()}/{entityKind === "meeting" && entityDate ? `${entityDate} ` : ""}{entityName || "未命名"}.md</p></details>
         <button class="qwb-text-action" type="button" disabled={!entityName.trim() || busy} on:click={() => run(previewEntityTemplate, "模板预览已生成")}>生成完整模板预览</button>

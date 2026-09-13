@@ -10,6 +10,7 @@
     reviewTaskTitle,
     type ProjectReviewDecision
   } from "../domain/project-review";
+  import { isPreSalesProject, matchesProjectType, normalizeProjectType, PROJECT_TYPES, type ProjectType } from "../domain/project-type";
   import type { TaskRecord } from "../core/types";
   import { effectiveTaskDate } from "../domain/widget-data";
   import { formatDate } from "../services/template-service";
@@ -17,16 +18,23 @@
 
   export let controller: WorkbenchController;
 
-  const decisions: Array<{ value: ProjectReviewDecision; label: string; hint: string }> = [
+  const standardDecisions: Array<{ value: ProjectReviewDecision; label: string; hint: string }> = [
     { value: "已通过", label: "通过", hint: "继续推进" },
     { value: "附条件通过", label: "附条件", hint: "补齐条件后推进" },
     { value: "暂缓", label: "暂缓", hint: "等待条件成熟" },
     { value: "停止", label: "停止", hint: "结束投入并归档" }
   ];
+  const presalesDecisions: Array<{ value: ProjectReviewDecision; label: string; hint: string }> = [
+    { value: "已通过", label: "继续售前", hint: "保持售前方案" },
+    { value: "赢单转交付", label: "赢单转交付", hint: "进入合同交付" },
+    { value: "暂缓", label: "暂缓", hint: "等待客户或条件" },
+    { value: "停止", label: "关闭", hint: "结束跟进并归档" }
+  ];
   let snapshot: WorkbenchSnapshot = controller.getSnapshot() ?? EMPTY_SNAPSHOT;
   let unsubscribe = () => {};
   let selectedPath = "";
   let query = "";
+  let projectTypeFilter: "全部" | ProjectType = "全部";
   let reviewed = new Set<string>();
   let queueOrder: string[] = [];
   let decision: ProjectReviewDecision | "" = "";
@@ -50,26 +58,35 @@
   $: today = formatDate(new Date(), "YYYY-MM-DD");
   $: candidates = projectReviewCandidates(snapshot.projects, today, snapshot.tasks);
   $: candidatePaths = candidates.map((project) => project.path);
+  $: filteredCandidates = candidates.filter((project) => matchesProjectType(project.projectType, projectTypeFilter));
+  $: filteredCandidatePaths = filteredCandidates.map((project) => project.path);
+  $: projectTypeCounts = Object.fromEntries(PROJECT_TYPES.map((projectType) => [
+    projectType,
+    candidates.filter((project) => normalizeProjectType(project.projectType) === projectType).length
+  ])) as Record<ProjectType, number>;
   $: queue = queueOrder
     .filter((path) => !reviewed.has(path))
     .map((path) => snapshot.projects.find((project) => project.path === path))
-    .filter((project): project is EntitySummary => Boolean(project));
+    .filter((project): project is EntitySummary => Boolean(project)
+      && matchesProjectType(project?.projectType, projectTypeFilter));
   $: visibleProjects = snapshot.projects.filter((project) => {
     const needle = query.trim().toLocaleLowerCase("zh-CN");
-    return !needle || `${project.name} ${project.client ?? ""} ${project.status ?? ""} ${project.phase ?? ""}`.toLocaleLowerCase("zh-CN").includes(needle);
+    return matchesProjectType(project.projectType, projectTypeFilter)
+      && (!needle || `${project.name} ${project.client ?? ""} ${project.projectType ?? ""} ${project.status ?? ""} ${project.phase ?? ""}`.toLocaleLowerCase("zh-CN").includes(needle));
   });
-  $: selected = selectedPath
-    ? snapshot.projects.find((project) => project.path === selectedPath)
-    : queue[0] ?? (query ? visibleProjects[0] : undefined);
+  $: selectableProjects = query ? visibleProjects : queue;
+  $: selected = selectableProjects.find((project) => project.path === selectedPath) ?? selectableProjects[0];
   $: if (selected && selectedPath !== selected.path) selectProject(selected.path);
   $: evidence = selected
     ? buildProjectReviewEvidence(selected, snapshot.tasks, snapshot.meetings, today, Date.now(), snapshot.knowledge)
     : undefined;
   $: totalCandidateCount = candidatePaths.length;
-  $: pendingCount = candidatePaths.filter((path) => !reviewed.has(path)).length;
+  $: pendingCount = filteredCandidatePaths.filter((path) => !reviewed.has(path)).length;
+  $: reviewedCount = filteredCandidatePaths.filter((path) => reviewed.has(path)).length;
   $: reviewDueRequired = decision === "附条件通过";
   $: canSave = Boolean(selected && decision && (!reviewDueRequired || reviewDue));
   $: mappedStatus = decision ? projectStatusForDecision(decision) : selected?.status || "未设置";
+  $: decisionOptions = isPreSalesProject(selected?.projectType) ? presalesDecisions : standardDecisions;
   $: phaseOptions = PROJECT_DEVELOPMENT_STAGES.includes(phase as typeof PROJECT_DEVELOPMENT_STAGES[number])
     ? [...PROJECT_DEVELOPMENT_STAGES]
     : [phase, ...PROJECT_DEVELOPMENT_STAGES].filter(Boolean);
@@ -82,6 +99,14 @@
   function reconcileQueue(current: string[], paths: string[]): string[] {
     const retained = current.filter((path) => paths.includes(path));
     return [...retained, ...paths.filter((path) => !retained.includes(path))];
+  }
+
+  function chooseProjectTypeFilter(value: "全部" | ProjectType): void {
+    projectTypeFilter = value;
+    query = "";
+    const next = candidates.find((project) => !reviewed.has(project.path)
+      && (value === "全部" || normalizeProjectType(project.projectType) === value));
+    selectedPath = next?.path ?? "";
   }
 
   function selectProject(path: string): void {
@@ -126,7 +151,8 @@
 
   function chooseDecision(value: ProjectReviewDecision): void {
     decision = value;
-    if (value === "已通过" || value === "停止") reviewDue = "";
+    if (value === "已通过" || value === "赢单转交付" || value === "停止") reviewDue = "";
+    if (value === "赢单转交付") phase = "方案定义";
   }
 
   function beginTaskUpdate(task: TaskRecord): void {
@@ -188,6 +214,7 @@
       await controller.saveProjectReview({
         projectPath: selected.path,
         decision,
+        currentProjectType: selected.projectType,
         phase: phase.trim() || undefined,
         nextAction: nextAction.trim() || undefined,
         reviewDue: reviewDue || undefined,
@@ -270,7 +297,7 @@
 
   <section class="review-summary" aria-label="审阅队列概览">
     <div><span use:obsidianIcon={"inbox"}></span><b>{pendingCount}</b><small>待处理</small></div>
-    <div><span use:obsidianIcon={"check-check"}></span><b>{reviewed.size}</b><small>本轮已阅</small></div>
+    <div><span use:obsidianIcon={"check-check"}></span><b>{reviewedCount}</b><small>{projectTypeFilter === "全部" ? "本轮已阅" : "本类已阅"}</small></div>
     <div><span use:obsidianIcon={"files"}></span><b>{totalCandidateCount}</b><small>全部候选</small></div>
   </section>
 
@@ -278,7 +305,13 @@
 
   <div class="review-layout">
     <aside class="review-queue">
-      <div class="queue-heading"><div><span>审阅队列</span><strong>{queue.length}</strong></div><small>候选项目优先；也可搜索全部项目</small></div>
+      <div class="queue-heading"><div><span>审阅队列</span><strong>{queue.length}</strong></div><small>候选项目优先；可搜索当前类型的全部项目</small></div>
+      <div class="project-type-filters" role="group" aria-label="按项目类型筛选审阅队列">
+        <button type="button" class:active={projectTypeFilter === "全部"} aria-pressed={projectTypeFilter === "全部"} on:click={() => chooseProjectTypeFilter("全部")}><span>全部</span><small>{totalCandidateCount}</small></button>
+        {#each PROJECT_TYPES as projectType}
+          <button type="button" class:active={projectTypeFilter === projectType} aria-pressed={projectTypeFilter === projectType} on:click={() => chooseProjectTypeFilter(projectType)}><span>{projectType}</span><small>{projectTypeCounts[projectType]}</small></button>
+        {/each}
+      </div>
       <label class="project-search"><i use:obsidianIcon={"search"}></i><input bind:value={query} type="search" placeholder="搜索项目、客户或研制阶段" /></label>
       <div class="queue-list">
         {#each (query ? visibleProjects : queue) as project (project.path)}
@@ -290,7 +323,7 @@
             </span>
           </button>
         {:else}
-          <div class="queue-empty"><span use:obsidianIcon={"circle-check-big"}></span><strong>本轮已清空</strong><small>可以搜索全部项目继续查看。</small></div>
+          <div class="queue-empty"><span use:obsidianIcon={"circle-check-big"}></span><strong>当前类型已清空</strong><small>切换项目类型，或搜索项目继续查看。</small></div>
         {/each}
       </div>
     </aside>
@@ -391,12 +424,15 @@
           </header>
           <fieldset class="decision-options">
             <legend>审阅结论</legend>
-            {#each decisions as option}
+            {#each decisionOptions as option}
               <button type="button" class:active={decision === option.value} aria-pressed={decision === option.value} on:click={() => chooseDecision(option.value)}><span>{option.label}</span><small>{option.hint}</small></button>
             {/each}
           </fieldset>
-          {#if decision && mappedStatus !== selected.status}
-            <p class="status-change" aria-live="polite">项目状态：{selected.status || "未设置"} → {mappedStatus}</p>
+          {#if decision && (mappedStatus !== selected.status || decision === "赢单转交付")}
+            <p class:conversion={decision === "赢单转交付"} class="status-change" aria-live="polite">
+              {#if decision === "赢单转交付"}项目类型：{normalizeProjectType(selected.projectType) || selected.projectType || "未设置"} → 合同交付{/if}
+              {#if mappedStatus !== selected.status}{decision === "赢单转交付" ? "；" : ""}项目状态：{selected.status || "未设置"} → {mappedStatus}{/if}
+            </p>
           {/if}
           <div class="project-update-fields">
             <label><span>研制阶段</span><select bind:value={phase} aria-label="研制阶段"><option value="">未设置</option>{#each phaseOptions as option}<option value={option}>{phaseOptionLabel(option)}</option>{/each}</select></label>
@@ -852,6 +888,12 @@
   .decision-fields { align-items: start; }
   .decision-options span { font-size: 14px; font-weight: 600; }
   .status-change { color: var(--text-muted); font-size: 13px; margin: 12px 0 0; }
+  .status-change.conversion { padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--review-accent) 34%, var(--review-line)); border-radius: 10px; background: color-mix(in srgb, var(--review-accent) 7%, var(--background-primary)); color: var(--text-normal); }
+  .project-type-filters { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 10px 0; }
+  .project-type-filters button { display: inline-flex; align-items: center; gap: 5px; min-height: 32px; padding: 0 9px; border: 1px solid var(--review-line); border-radius: 999px; background: var(--background-primary); color: var(--text-muted); cursor: pointer; }
+  .project-type-filters button.active { border-color: color-mix(in srgb, var(--review-accent) 55%, var(--review-line)); background: color-mix(in srgb, var(--review-accent) 10%, var(--background-primary)); color: var(--text-normal); }
+  .project-type-filters button span { font-size: 11px; font-weight: 700; white-space: nowrap; }
+  .project-type-filters button small { min-width: 16px; color: var(--text-muted); font-size: 10px; font-variant-numeric: tabular-nums; text-align: center; }
   .task-evidence-row { grid-template-columns: 36px minmax(0, 1fr) auto auto; }
   .task-open strong { white-space: normal; overflow-wrap: anywhere; line-height: 1.5; }
   .task-quick-editor { grid-template-columns: repeat(3, minmax(0, 1fr)) auto; }

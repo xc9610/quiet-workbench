@@ -1,5 +1,5 @@
 import { appendToSection, contentRevision, normalizeNewlines, parseFrontmatter, stableHash } from "../domain/markdown";
-import { projectStatusForDecision, validateProjectReviewInput, type ProjectReviewInput } from "../domain/project-review";
+import { projectStatusForDecision, projectTypeForDecision, validateProjectReviewInput, type ProjectReviewInput } from "../domain/project-review";
 import type { DetailedTransactionReceipt } from "../domain/transactions";
 import { renderTaskLine } from "./task-service";
 import { WriteTransactionExecutor } from "./transaction-service";
@@ -14,7 +14,9 @@ export class ProjectReviewService {
     const before = await this.vault.read(path);
     const date = localDate(now);
     const status = projectStatusForDecision(input.decision);
+    const projectType = projectTypeForDecision(input.decision, input.currentProjectType);
     let after = setFrontmatterFields(before, {
+      ...(input.decision === "赢单转交付" ? { project_type: projectType } : {}),
       status,
       phase: input.phase?.trim() || undefined,
       next_action: input.nextAction?.trim() || undefined,
@@ -24,7 +26,8 @@ export class ProjectReviewService {
       review_note: input.note?.trim() || undefined,
       updated: date
     });
-    const trace = `- ${date}：项目审阅结论为「${input.decision}」；状态更新为「${status}」${input.phase?.trim() ? `；研制阶段「${input.phase.trim()}」` : ""}${input.nextAction?.trim() ? `；下一步：${input.nextAction.trim()}` : ""}${input.note?.trim() ? `；${input.note.trim()}` : ""}${input.reviewDue ? `；复审 ${input.reviewDue}` : ""}`;
+    const typeTrace = input.decision === "赢单转交付" ? `；项目类型由「${input.currentProjectType}」转为「合同交付」` : "";
+    const trace = `- ${date}：项目审阅结论为「${input.decision}」；状态更新为「${status}」${typeTrace}${input.phase?.trim() ? `；研制阶段「${input.phase.trim()}」` : ""}${input.nextAction?.trim() ? `；下一步：${input.nextAction.trim()}` : ""}${input.note?.trim() ? `；${input.note.trim()}` : ""}${input.reviewDue ? `；复审 ${input.reviewDue}` : ""}`;
     after = insertProgressTrace(after, trace);
     if (input.task?.text.trim()) {
       const text = input.task.text.trim();

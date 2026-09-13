@@ -88,6 +88,7 @@ export interface WorkbenchSnapshot {
 export interface CreateEntityInput {
   kind: Exclude<EntityKind, "knowledge">;
   name: string;
+  projectType?: string;
   relatedClient?: string;
   relatedProject?: string;
   date?: string;

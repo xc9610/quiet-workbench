@@ -6,6 +6,7 @@ import {
   PROJECT_DEVELOPMENT_STAGES,
   projectReviewCandidates,
   projectStatusForDecision,
+  projectTypeForDecision,
   projectReviewTriggers,
   serializeProjectReviewEvidence
 } from "../src/domain/project-review";
@@ -91,6 +92,7 @@ describe("project review evidence", () => {
     expect(projectReviewTriggers(overdue, "2026-08-29", [overdueTask])).toEqual(["1 项任务逾期"]);
     expect(projectReviewCandidates([active, overdue], "2026-08-29", [overdueTask]).map((entry) => entry.name)).toEqual(["热控设计", "逾期项目"]);
     expect(projectStatusForDecision("停止")).toBe("归档");
+    expect(projectTypeForDecision("赢单转交付", "售前方案")).toBe("合同交付");
   });
 
   it("keeps evidence scoped to the selected project and related meetings", () => {
@@ -218,5 +220,48 @@ describe("ProjectReviewService", () => {
     await expect(service.save({ projectPath: "projects/热控设计.md", decision: "附条件通过" }))
       .rejects.toThrow("复审日期");
     expect(await vault.read("projects/热控设计.md")).toBe(original);
+  });
+
+  it("converts a won pre-sales project to contract delivery in one review write", async () => {
+    const vault = new MemoryVault();
+    vault.seed("projects/方案.md", [
+      "---",
+      "type: 项目",
+      "project_type: 售前方案",
+      "status: 推进中",
+      "phase: 方案定义",
+      "---",
+      "# 方案",
+      "",
+      "## 推进记录"
+    ].join("\n"));
+    const service = new ProjectReviewService(vault, new WriteTransactionExecutor(vault));
+    await service.save({
+      projectPath: "projects/方案.md",
+      decision: "赢单转交付",
+      currentProjectType: "售前方案",
+      phase: "方案定义",
+      nextAction: "召开项目启动会",
+      note: "合同已确认"
+    }, new Date(2026, 8, 13, 12));
+    const after = await vault.read("projects/方案.md");
+    expect(after).toContain('project_type: "合同交付"');
+    expect(after).toContain('status: "推进中"');
+    expect(after).toContain('review_status: "赢单转交付"');
+    expect(after).toContain("项目类型由「售前方案」转为「合同交付」");
+    expect(after).toContain("下一步：召开项目启动会");
+  });
+
+  it("rejects a contract conversion for a non-sales project", async () => {
+    const vault = new MemoryVault();
+    const original = "---\ntype: 项目\nproject_type: 内部研发\n---\n# 项目";
+    vault.seed("projects/研发.md", original);
+    const service = new ProjectReviewService(vault, new WriteTransactionExecutor(vault));
+    await expect(service.save({
+      projectPath: "projects/研发.md",
+      decision: "赢单转交付",
+      currentProjectType: "内部研发"
+    })).rejects.toThrow("售前方案");
+    expect(await vault.read("projects/研发.md")).toBe(original);
   });
 });

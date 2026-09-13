@@ -1,9 +1,10 @@
 import type { TaskRecord } from "../core/types";
 import { isClosedProjectStatus } from "./project-status";
+import { isPreSalesProject } from "./project-type";
 import type { EntitySummary } from "../ui/controller";
 import { calculateProjectHealth, dateAfter, effectiveTaskDate, isWaitingTask, type ProjectHealthResult } from "./widget-data";
 
-export type ProjectReviewDecision = "已通过" | "附条件通过" | "暂缓" | "停止";
+export type ProjectReviewDecision = "已通过" | "附条件通过" | "赢单转交付" | "暂缓" | "停止";
 
 // Keep the stored key as `phase` for compatibility, while presenting one
 // thermal-control development vocabulary everywhere the review flow edits it.
@@ -24,6 +25,7 @@ export interface ProjectReviewTaskInput {
 export interface ProjectReviewInput {
   projectPath: string;
   decision: ProjectReviewDecision;
+  currentProjectType?: string;
   phase?: string;
   nextAction?: string;
   reviewDue?: string;
@@ -45,13 +47,16 @@ export interface ProjectReviewEvidence {
 }
 
 export function buildProjectReviewAiPrompt(evidence: ProjectReviewEvidence, today: string): string {
+  const conclusionGuide = isPreSalesProject(evidence.project.projectType)
+    ? "给出建议结论（继续售前、赢单转合同交付、暂缓或关闭）及理由，但明确标注为建议。"
+    : "给出建议结论（通过、附条件通过、暂缓或停止）及理由，但明确标注为建议。";
   return [
     "请使用 project-review 技能，在当前对话中持续协助我审阅这个项目。",
     "先根据当前项目笔记与 Asterism 证据包给出第一轮只读审阅，然后等待我的追问、补充证据和决定；不要把审阅当成一次性处理。",
     "不要修改任何文件、任务、状态、日期或审阅结论；需要修改时先给差异预览并等待我明确确认。",
     "请区分已确认事实、冲突、缺失证据、风险、待用户决定事项和建议，不要因为没有记录就断言没有开展。",
     `审阅基准日期：${today}`,
-    "给出建议结论（通过、附条件通过、暂缓或停止）及理由，但明确标注为建议。",
+    conclusionGuide,
     "后续对话继续沿用 project-review 的证据边界和安全规则。"
   ].join("\n");
 }
@@ -103,9 +108,14 @@ export function projectStatusForDecision(decision: ProjectReviewDecision): strin
   return {
     "已通过": "推进中",
     "附条件通过": "推进中",
+    "赢单转交付": "推进中",
     "暂缓": "暂停",
     "停止": "归档"
   }[decision];
+}
+
+export function projectTypeForDecision(decision: ProjectReviewDecision, currentType?: string): string | undefined {
+  return decision === "赢单转交付" ? "合同交付" : currentType;
 }
 
 export function projectReviewTriggers(
@@ -188,11 +198,14 @@ export function projectReviewCandidates(
 
 export function validateProjectReviewInput(input: ProjectReviewInput): void {
   if (!input.projectPath.trim()) throw new Error("请选择需要审阅的项目。");
-  if (!(["已通过", "附条件通过", "暂缓", "停止"] as string[]).includes(input.decision)) {
+  if (!(["已通过", "附条件通过", "赢单转交付", "暂缓", "停止"] as string[]).includes(input.decision)) {
     throw new Error("不支持的项目审阅结论。");
   }
   if (input.decision === "附条件通过" && !input.reviewDue) {
     throw new Error("附条件通过需要填写复审日期。");
+  }
+  if (input.decision === "赢单转交付" && !isPreSalesProject(input.currentProjectType)) {
+    throw new Error("只有售前方案可以通过此结论转为合同交付。");
   }
   if (input.reviewDue && !/^\d{4}-\d{2}-\d{2}$/u.test(input.reviewDue)) {
     throw new Error("复审日期应使用 YYYY-MM-DD 格式。");

@@ -50,6 +50,7 @@ import {
   serializeProjectReviewEvidence,
   type ProjectReviewInput
 } from "./domain/project-review";
+import { projectFolderForType } from "./domain/project-type";
 import { formatDate } from "./services/template-service";
 import { enhanceProjectTimeline, renderProjectRelatedFiles } from "./services/project-note-enhancer";
 import { QuietWorkbenchSettingTab } from "./settings-tab";
@@ -344,7 +345,9 @@ class PluginWorkbenchController implements WorkbenchController {
 
   async previewEntity(input: CreateEntityInput): Promise<{ path: string; content: string }> {
     const name = sanitizeTitle(input.name);
-    const folder = this.folderForKind(input.kind);
+    const folder = input.kind === "project"
+      ? projectFolderForType(this.folderForKind(input.kind), input.projectType)
+      : this.folderForKind(input.kind);
     const templatePath = this.plugin.settings.templates[input.kind];
     const templateFile = this.plugin.app.vault.getAbstractFileByPath(normalizePath(templatePath));
     if (!(templateFile instanceof TFile)) throw new Error(`模板不存在：${templatePath}`);
@@ -1100,6 +1103,7 @@ function localDateKey(value: number | Date): string {
 
 function applyEntityContext(content: string, input: CreateEntityInput): string {
   let result = content;
+  if (input.kind === "project" && input.projectType) result = setFrontmatterField(result, "project_type", input.projectType);
   if (input.relatedClient) result = setFrontmatterField(result, "client", toWikiLink(input.relatedClient));
   if (input.relatedProject) result = setFrontmatterField(result, "project", toWikiLink(input.relatedProject));
   if (input.date) {
