@@ -1,5 +1,5 @@
 import type { TaskRecord } from "../core/types";
-import { isClosedProjectStatus } from "./project-status";
+import { isClosedProjectStatus, projectStatusLabel } from "./project-status";
 import { isPreSalesProject } from "./project-type";
 import type { EntitySummary } from "../ui/controller";
 import { calculateProjectHealth, dateAfter, effectiveTaskDate, isWaitingTask, type ProjectHealthResult } from "./widget-data";
@@ -31,6 +31,7 @@ export interface ProjectReviewInput {
   reviewDue?: string;
   note?: string;
   tasks?: ProjectReviewTaskInput[];
+  hasOpenTasks?: boolean;
 }
 
 export interface ProjectReviewEvidence {
@@ -123,17 +124,22 @@ export function projectReviewTriggers(
   today: string,
   allTasks: readonly TaskRecord[] = []
 ): string[] {
+  if (isClosedProjectStatus(project.status)) return [];
   const triggers: string[] = [];
   if (project.reviewStatus === "待审议") triggers.push(project.reviewTrigger || "主动提交审阅");
   if (project.reviewDue && project.reviewDue <= today) triggers.push("已到复审日期");
-  if (!isClosedProjectStatus(project.status)) {
-    const openTasks = allTasks.filter((task) => task.scope === "project" && task.path === project.path && !task.completed);
-    const overdue = openTasks.filter((task) => {
-      const date = effectiveTaskDate(task);
-      return Boolean(date && date < today);
-    }).length;
-    if (overdue > 0) triggers.push(`${overdue} 项任务逾期`);
+  const status = projectStatusLabel(project.status);
+  if (status === "暂停") return [...new Set(triggers)];
+  const openTasks = allTasks.filter((task) => task.scope === "project" && task.path === project.path && !task.completed);
+  const overdue = openTasks.filter((task) => {
+    const date = effectiveTaskDate(task);
+    return Boolean(date && date < today);
+  }).length;
+  if (overdue > 0) triggers.push(`${overdue} 项任务逾期`);
+  if (status === "推进中") {
     if (!project.nextAction?.trim() && openTasks.length === 0) triggers.push("缺少明确下一步");
+    const staleBefore = new Date(`${today}T00:00:00`).getTime() - 14 * 86_400_000;
+    if (project.updatedAt && project.updatedAt < staleBefore) triggers.push("超过 14 天没有更新");
   }
   return [...new Set(triggers)];
 }
@@ -206,8 +212,8 @@ export function validateProjectReviewInput(input: ProjectReviewInput): void {
   if (!(["已通过", "附条件通过", "赢单转交付", "暂缓", "停止"] as string[]).includes(input.decision)) {
     throw new Error("不支持的项目审阅结论。");
   }
-  if (input.decision === "附条件通过" && !input.reviewDue) {
-    throw new Error("附条件通过需要填写复审日期。");
+  if ((input.decision === "附条件通过" || input.decision === "暂缓") && !input.reviewDue) {
+    throw new Error(`${input.decision}需要填写复审日期。`);
   }
   if (input.decision === "赢单转交付" && !isPreSalesProject(input.currentProjectType)) {
     throw new Error("只有售前方案可以通过此结论转为合同交付。");
@@ -221,6 +227,9 @@ export function validateProjectReviewInput(input: ProjectReviewInput): void {
     }
     if (!task.text.trim()) throw new Error("任务内容不能为空。");
   }
+  const continues = (["已通过", "附条件通过", "赢单转交付"] as ProjectReviewDecision[]).includes(input.decision);
+  const hasAction = Boolean(input.nextAction?.trim() || input.hasOpenTasks || input.tasks?.some((task) => task.text.trim()));
+  if (continues && !hasAction) throw new Error("继续推进前，请填写下一步或新增至少一条任务。");
 }
 
 function reviewPriority(project: EntitySummary, today: string, allTasks: readonly TaskRecord[]): number {

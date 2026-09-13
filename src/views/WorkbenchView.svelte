@@ -89,7 +89,7 @@
   export let controller: WorkbenchController;
 
   type DialogKind = "note" | "entity" | "task" | "task-edit" | "schedule" | "migrate" | "knowledge" | "yolo-preview" | null;
-  const UI_VERSION = "0.8.15";
+  const UI_VERSION = "0.8.16";
   const DEFAULT_NOTE_FOLDER = controller.settings.solutionAssetsFolder || DEFAULT_PROJECT_NOTE_FOLDER;
 
   interface EntityDraft {

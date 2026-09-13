@@ -96,6 +96,16 @@ describe("project review evidence", () => {
     expect(projectTypeForDecision("赢单转交付", "售前方案")).toBe("合同交付");
   });
 
+  it("excludes closed projects and reviews active projects that have gone stale", () => {
+    const stale = project({ nextAction: "等待下一轮设计输入", updatedAt: new Date(2026, 7, 1).getTime() });
+    const paused = project({ status: "暂停", updatedAt: new Date(2026, 7, 1).getTime() });
+    const pausedTask = task({ due: "2026-08-01" });
+    const closed = project({ status: "已完成", reviewStatus: "待审议", reviewDue: "2026-08-01" });
+    expect(projectReviewTriggers(stale, "2026-08-29")).toEqual(["超过 14 天没有更新"]);
+    expect(projectReviewTriggers(paused, "2026-08-29", [pausedTask])).toEqual([]);
+    expect(projectReviewTriggers(closed, "2026-08-29")).toEqual([]);
+  });
+
   it("keeps evidence scoped to the selected project and related meetings", () => {
     const evidence = buildProjectReviewEvidence(
       project({ due: "2026-08-28", detail: "完成热设计评审" }),
@@ -232,6 +242,28 @@ describe("ProjectReviewService", () => {
 
     await expect(service.save({ projectPath: "projects/热控设计.md", decision: "附条件通过" }))
       .rejects.toThrow("复审日期");
+    expect(await vault.read("projects/热控设计.md")).toBe(original);
+  });
+
+  it("requires a review date when pausing a project", async () => {
+    const vault = new MemoryVault();
+    const original = "---\ntype: 项目\n---\n# 项目";
+    vault.seed("projects/热控设计.md", original);
+    const service = new ProjectReviewService(vault, new WriteTransactionExecutor(vault));
+
+    await expect(service.save({ projectPath: "projects/热控设计.md", decision: "暂缓" }))
+      .rejects.toThrow("暂缓需要填写复审日期");
+    expect(await vault.read("projects/热控设计.md")).toBe(original);
+  });
+
+  it("requires an executable action before continuing a project", async () => {
+    const vault = new MemoryVault();
+    const original = "---\ntype: 项目\n---\n# 项目";
+    vault.seed("projects/热控设计.md", original);
+    const service = new ProjectReviewService(vault, new WriteTransactionExecutor(vault));
+
+    await expect(service.save({ projectPath: "projects/热控设计.md", decision: "已通过" }))
+      .rejects.toThrow("填写下一步或新增至少一条任务");
     expect(await vault.read("projects/热控设计.md")).toBe(original);
   });
 

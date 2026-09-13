@@ -84,9 +84,11 @@
   $: totalCandidateCount = candidatePaths.length;
   $: pendingCount = filteredCandidatePaths.filter((path) => !reviewed.has(path)).length;
   $: reviewedCount = filteredCandidatePaths.filter((path) => reviewed.has(path)).length;
-  $: reviewDueRequired = decision === "附条件通过";
-  $: canSave = Boolean(selected && decision && (!reviewDueRequired || reviewDue));
+  $: reviewDueRequired = decision === "附条件通过" || decision === "暂缓";
   $: readyNewTaskCount = newTasks.filter((task) => task.text.trim()).length;
+  $: actionRequired = decision === "已通过" || decision === "附条件通过" || decision === "赢单转交付";
+  $: hasReviewAction = Boolean(nextAction.trim() || evidence?.openTasks.length || readyNewTaskCount);
+  $: canSave = Boolean(selected && decision && (!reviewDueRequired || reviewDue) && (!actionRequired || hasReviewAction));
   $: mappedStatus = decision ? projectStatusForDecision(decision) : selected?.status || "未设置";
   $: decisionOptions = isPreSalesProject(selected?.projectType) ? presalesDecisions : standardDecisions;
   $: phaseOptions = PROJECT_DEVELOPMENT_STAGES.includes(phase as typeof PROJECT_DEVELOPMENT_STAGES[number])
@@ -223,6 +225,7 @@
         nextAction: nextAction.trim() || undefined,
         reviewDue: reviewDue || undefined,
         note: note.trim() || undefined,
+        hasOpenTasks: evidence.openTasks.length > 0,
         tasks: newTasks
           .filter((task) => task.text.trim())
           .map((task) => ({ text: task.text.trim(), due: task.due || undefined }))
@@ -460,6 +463,12 @@
             {/if}
             <label class="decision-note"><span>审阅意见</span><textarea bind:value={note} rows="3" placeholder="关键判断、附加条件或需要补齐的证据"></textarea></label>
           </div>
+          {#if decision && ((reviewDueRequired && !reviewDue) || (actionRequired && !hasReviewAction))}
+            <div class="review-validation" role="status" aria-live="polite">
+              {#if reviewDueRequired && !reviewDue}<p>请设置下次复审日期。</p>{/if}
+              {#if actionRequired && !hasReviewAction}<p>继续推进前，请填写下一步或新增至少一条任务。</p>{/if}
+            </div>
+          {/if}
           <footer><small>保存后保留审阅记录</small><button type="button" disabled={busy || Boolean(taskBusyId)} on:click={() => advance(false)}>跳过</button><button class="primary" disabled={busy || Boolean(taskBusyId) || !controller.settings.writesEnabled || !canSave} on:click={saveReview}>{busy ? "保存中…" : "保存并审下一个"}</button></footer>
         </section>
 
@@ -907,6 +916,8 @@
   .decision-options span { font-size: 14px; font-weight: 600; }
   .status-change { color: var(--text-muted); font-size: 13px; margin: 12px 0 0; }
   .status-change.conversion { padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--review-accent) 34%, var(--review-line)); border-radius: 10px; background: color-mix(in srgb, var(--review-accent) 7%, var(--background-primary)); color: var(--text-normal); }
+  .review-validation { display: grid; gap: 4px; margin-top: 10px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--color-orange) 38%, var(--review-line)); border-radius: 10px; background: color-mix(in srgb, var(--color-orange) 7%, var(--background-primary)); }
+  .review-validation p { margin: 0; color: var(--text-normal); font-size: 12px; line-height: 1.5; }
   .project-type-filters { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 10px 0; }
   .project-type-filters button { display: inline-flex; align-items: center; gap: 5px; min-height: 32px; padding: 0 9px; border: 1px solid var(--review-line); border-radius: 999px; background: var(--background-primary); color: var(--text-muted); cursor: pointer; }
   .project-type-filters button.active { border-color: color-mix(in srgb, var(--review-accent) 55%, var(--review-line)); background: color-mix(in srgb, var(--review-accent) 10%, var(--background-primary)); color: var(--text-normal); }
