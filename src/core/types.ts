@@ -28,6 +28,8 @@ export interface TaskRecord {
   line: number;
   text: string;
   completed: boolean;
+  /** Tasks-compatible cancelled state (`[-]`). Cancelled tasks are terminal but not completed work. */
+  cancelled?: boolean;
   due?: string;
   scheduled?: string;
   priority?: "highest" | "high" | "normal" | "low" | "lowest";

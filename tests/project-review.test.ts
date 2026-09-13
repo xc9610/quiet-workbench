@@ -134,6 +134,15 @@ describe("project review evidence", () => {
     expect(evidence.health.reasons).not.toContain("项目目标日期已过");
   });
 
+  it("does not treat cancelled Tasks items as unfinished project work", () => {
+    const cancelled = task({ completed: true, cancelled: true, due: "2026-08-01" });
+    const evidence = buildProjectReviewEvidence(project({ nextAction: "确认后续范围" }), [cancelled], [], "2026-08-29");
+    expect(evidence.openTasks).toEqual([]);
+    expect(evidence.overdueTasks).toEqual([]);
+    expect(evidence.health.completed).toBe(0);
+    expect(evidence.health.progress).toBe(0);
+  });
+
   it("builds a bounded read-only evidence package for the YOLO skill", () => {
     const evidence = buildProjectReviewEvidence(
       project({ client: "晨星实验室", due: "2026-08-28", nextAction: "补齐试验数据" }),

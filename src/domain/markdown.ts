@@ -17,10 +17,10 @@ export interface ParsedMarkdown {
 export interface ParsedTask extends TaskRecord {
   raw: string;
   indent: string;
-  marker: " " | "x" | "X";
+  marker: " " | "x" | "X" | "-";
 }
 
-export const TASK_PATTERN = /^(\s*)[-*+]\s+\[([ xX])\]\s+(.*)$/;
+export const TASK_PATTERN = /^(\s*)[-*+]\s+\[([ xX-])\]\s+(.*)$/;
 const DATE_PATTERN = /📅\s*(\d{4}-\d{2}-\d{2})/u;
 const SCHEDULED_PATTERN = /(?:⏳|🛫)\s*(\d{4}-\d{2}-\d{2})/u;
 const BLOCK_ID_PATTERN = /(?:^|\s)\^([A-Za-z0-9-]+)\s*$/u;
@@ -138,7 +138,7 @@ export function parseTasks(
     if (allowedHeadings?.length && !allowedHeadings.includes(currentSection)) continue;
     const match = raw.match(TASK_PATTERN);
     if (!match) continue;
-    const marker = (match[2] ?? " ") as " " | "x" | "X";
+    const marker = (match[2] ?? " ") as " " | "x" | "X" | "-";
     const taskBody = match[3] ?? "";
     const blockId = taskBody.match(BLOCK_ID_PATTERN)?.[1];
     const priority = PRIORITIES.find(([emoji]) => taskBody.includes(emoji))?.[1] ?? "normal";
@@ -150,7 +150,8 @@ export function parseTasks(
       path: options.path,
       line: index + 1,
       text,
-      completed: marker.toLowerCase() === "x",
+      completed: marker.toLowerCase() === "x" || marker === "-",
+      cancelled: marker === "-",
       due: taskBody.match(DATE_PATTERN)?.[1],
       scheduled: taskBody.match(SCHEDULED_PATTERN)?.[1],
       priority,

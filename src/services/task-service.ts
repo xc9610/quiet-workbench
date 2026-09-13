@@ -198,7 +198,7 @@ function priorityEmoji(priority: NonNullable<TaskRecord["priority"]>): string {
 function sanitizeTaskText(text: string): string {
   return text
     .replace(/[\r\n]+/g, " ")
-    .replace(/^\s*[-*+]\s+\[[ xX]\]\s+/, "")
+    .replace(/^\s*[-*+]\s+\[[ xX-]\]\s+/, "")
     .replace(/\s{2,}/g, " ")
     .trim();
 }

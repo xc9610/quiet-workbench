@@ -168,6 +168,33 @@
     taskEditPriority = task.priority ?? "normal";
   }
 
+  async function editTask(task: TaskRecord): Promise<void> {
+    if (!controller.tasksIntegrationAvailable()) {
+      beginTaskUpdate(task);
+      return;
+    }
+    if (busy || taskBusyId || task.scope === "meeting-draft") return;
+    taskBusyId = task.id;
+    message = "";
+    try {
+      const result = await controller.editTaskWithTasks(task);
+      if (result === "committed") {
+        messageTone = "ok";
+        message = "任务已通过 Tasks 编辑器更新。";
+        editingTaskId = "";
+      } else if (result === "unavailable") {
+        beginTaskUpdate(task);
+        messageTone = "error";
+        message = "Tasks 编辑器暂不可用，已切换到快速调整。";
+      }
+    } catch (error) {
+      messageTone = "error";
+      message = error instanceof Error ? error.message : String(error);
+    } finally {
+      taskBusyId = "";
+    }
+  }
+
   async function toggleTask(task: TaskRecord): Promise<void> {
     if (busy || taskBusyId || task.scope === "meeting-draft") return;
     taskBusyId = task.id;
@@ -387,7 +414,7 @@
                     <button class="task-complete" aria-label={`完成任务：${task.text}`} title="标记完成" disabled={busy || Boolean(taskBusyId) || !controller.settings.writesEnabled} on:click={() => toggleTask(task)}><span use:obsidianIcon={taskBusyId === task.id ? "loader-circle" : "circle"} class:spinning={taskBusyId === task.id}></span></button>
                     <button class="task-open" on:click={() => controller.openPath(task.path)}><i class:overdue={Boolean(effectiveTaskDate(task) && effectiveTaskDate(task)! < today)}></i><span><strong>{reviewTaskTitle(task.text, selected.name)}</strong></span></button>
                     <time class:overdue={Boolean(effectiveTaskDate(task) && effectiveTaskDate(task)! < today)}>{effectiveTaskDate(task) && effectiveTaskDate(task)! < today ? "逾期 · " : ""}{task.scheduled ? "计划 " : task.due ? "截止 " : ""}{scopeDate(task)}</time>
-                    <button class="task-adjust" aria-expanded={editingTaskId === task.id} on:click={() => beginTaskUpdate(task)}>{editingTaskId === task.id ? "收起" : "调整"}</button>
+                    <button class="task-adjust" aria-expanded={editingTaskId === task.id} disabled={busy || Boolean(taskBusyId) || !controller.settings.writesEnabled} title={controller.tasksIntegrationAvailable() ? "使用 Tasks 完整编辑" : "快速调整日期和优先级"} on:click={() => editTask(task)}>{controller.tasksIntegrationAvailable() ? "Tasks 编辑" : editingTaskId === task.id ? "收起" : "调整"}</button>
                   </div>
                   {#if editingTaskId === task.id}
                     <div class="task-quick-editor">

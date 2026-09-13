@@ -137,12 +137,13 @@ export function clientFollowupBucket(
 
 export function calculateProjectHealth(
   project: ProjectHealthInput,
-  tasks: ReadonlyArray<Pick<TaskRecord, "completed" | "due" | "scheduled">>,
+  tasks: ReadonlyArray<Pick<TaskRecord, "completed" | "cancelled" | "due" | "scheduled">>,
   today: string,
   now = Date.now()
 ): ProjectHealthResult {
-  const completed = tasks.filter((task) => task.completed).length;
-  const openTasks = tasks.filter((task) => !task.completed);
+  const activeTasks = tasks.filter((task) => !task.cancelled);
+  const completed = activeTasks.filter((task) => task.completed).length;
+  const openTasks = activeTasks.filter((task) => !task.completed);
   const weekEnd = dateAfter(today, 7);
   const overdue = openTasks.filter((task) => {
     const date = effectiveTaskDate(task);
@@ -160,7 +161,7 @@ export function calculateProjectHealth(
   if (project.updatedAt && now - project.updatedAt > 14 * 86_400_000) reasons.push("超过 14 天没有更新");
   if (openTasks.length > 0 && !project.detail) reasons.push("尚未填写明确下一步");
   if (openTasks.length >= 10) reasons.push(`${openTasks.length} 项待处理任务积压`);
-  const hasData = tasks.length > 0 || Boolean(project.due || project.updatedAt || project.detail);
+  const hasData = activeTasks.length > 0 || Boolean(project.due || project.updatedAt || project.detail);
   const level: ProjectHealthLevel = !hasData
     ? "unknown"
     : overdue >= 2 || openTasks.length >= 20 || Boolean(project.due && project.due < today)
@@ -176,6 +177,6 @@ export function calculateProjectHealth(
     overdue,
     dueSoon,
     unscheduled,
-    progress: tasks.length ? Math.round((completed / tasks.length) * 100) : 0
+    progress: activeTasks.length ? Math.round((completed / activeTasks.length) * 100) : 0
   };
 }

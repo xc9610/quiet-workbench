@@ -73,6 +73,7 @@ describe("Markdown domain", () => {
       "---",
       "## 待办",
       "- [ ] 准备方案 🔼 ⏳ 2026-08-10 📅 2026-08-12 ^action-1",
+      "- [-] 已取消方案 ^action-cancelled",
       "```md",
       "- [ ] 这不是任务",
       "```"
@@ -83,7 +84,7 @@ describe("Markdown domain", () => {
     });
     expect(canonical.organization_type).toBe("科研院所");
     expect(parsed.frontmatter?.fields.aliases).toEqual(["示例", "Example"]);
-    expect(parsed.tasks).toHaveLength(1);
+    expect(parsed.tasks).toHaveLength(2);
     expect(parsed.tasks[0]).toMatchObject({
       scope: "client",
       text: "准备方案",
@@ -91,6 +92,13 @@ describe("Markdown domain", () => {
       scheduled: "2026-08-10",
       due: "2026-08-12",
       blockId: "action-1"
+    });
+    expect(parsed.tasks[1]).toMatchObject({
+      text: "已取消方案",
+      completed: true,
+      cancelled: true,
+      marker: "-",
+      blockId: "action-cancelled"
     });
   });
 
@@ -437,7 +445,7 @@ describe("project tasks and meeting migration", () => {
     vault.seed("projects/a.md", "---\ntype: 项目\n---\n\n## 待办\n");
     const adapter = new TasksApiAdapter(() => ({
       createTaskLineModal: async () => "- [ ] 高级任务 🔁 every month 📅 2026-09-01",
-      editTaskLineModal: async (line) => line.replace("高级任务", "高级任务（已编辑）"),
+      editTaskLineModal: async (line) => line.replace("- [ ]", "- [-]").replace("高级任务", "高级任务（已编辑）"),
       executeToggleTaskDoneCommand: (line) => line
     }));
     const tasks = new ProjectTaskService(vault, new WriteTransactionExecutor(vault), adapter);
@@ -450,7 +458,9 @@ describe("project tasks and meeting migration", () => {
     expect(edited.status).toBe("committed");
     const afterEdit = await vault.read("projects/a.md");
     expect(afterEdit).toContain("高级任务（已编辑）");
+    expect(afterEdit).toContain("- [-]");
     expect(afterEdit).toContain(`^${current.blockId}`);
+    expect(parseSingleTask(afterEdit, "projects/a.md", "project")).toMatchObject({ completed: true, cancelled: true });
   });
 
   it("migrates a meeting action once and records a stable source receipt", async () => {
