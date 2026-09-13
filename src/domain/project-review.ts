@@ -30,7 +30,7 @@ export interface ProjectReviewInput {
   nextAction?: string;
   reviewDue?: string;
   note?: string;
-  task?: ProjectReviewTaskInput;
+  tasks?: ProjectReviewTaskInput[];
 }
 
 export interface ProjectReviewEvidence {
@@ -196,6 +196,11 @@ export function projectReviewCandidates(
     });
 }
 
+export function reconcileProjectReviewQueue(current: readonly string[], candidates: readonly string[], activePath = ""): string[] {
+  const retained = current.filter((path) => candidates.includes(path) || path === activePath);
+  return [...retained, ...candidates.filter((path) => !retained.includes(path))];
+}
+
 export function validateProjectReviewInput(input: ProjectReviewInput): void {
   if (!input.projectPath.trim()) throw new Error("请选择需要审阅的项目。");
   if (!(["已通过", "附条件通过", "赢单转交付", "暂缓", "停止"] as string[]).includes(input.decision)) {
@@ -210,10 +215,12 @@ export function validateProjectReviewInput(input: ProjectReviewInput): void {
   if (input.reviewDue && !/^\d{4}-\d{2}-\d{2}$/u.test(input.reviewDue)) {
     throw new Error("复审日期应使用 YYYY-MM-DD 格式。");
   }
-  if (input.task?.due && !/^\d{4}-\d{2}-\d{2}$/u.test(input.task.due)) {
-    throw new Error("任务日期应使用 YYYY-MM-DD 格式。");
+  for (const task of input.tasks ?? []) {
+    if (task.due && !/^\d{4}-\d{2}-\d{2}$/u.test(task.due)) {
+      throw new Error("任务日期应使用 YYYY-MM-DD 格式。");
+    }
+    if (!task.text.trim()) throw new Error("任务内容不能为空。");
   }
-  if (input.task && !input.task.text.trim()) throw new Error("任务内容不能为空。");
 }
 
 function reviewPriority(project: EntitySummary, today: string, allTasks: readonly TaskRecord[]): number {

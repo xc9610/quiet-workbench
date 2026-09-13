@@ -5,6 +5,7 @@ import {
   buildProjectReviewEvidence,
   PROJECT_DEVELOPMENT_STAGES,
   projectReviewCandidates,
+  reconcileProjectReviewQueue,
   projectStatusForDecision,
   projectTypeForDecision,
   projectReviewTriggers,
@@ -148,6 +149,14 @@ describe("project review evidence", () => {
 });
 
 describe("ProjectReviewService", () => {
+  it("keeps the active project selected when an immediate task update removes its queue trigger", () => {
+    expect(reconcileProjectReviewQueue(
+      ["projects/active.md", "projects/next.md"],
+      ["projects/next.md"],
+      "projects/active.md"
+    )).toEqual(["projects/active.md", "projects/next.md"]);
+  });
+
   it("uses a concise thermal-control development vocabulary", () => {
     expect(PROJECT_DEVELOPMENT_STAGES).toEqual([
       "方案定义",
@@ -192,7 +201,10 @@ describe("ProjectReviewService", () => {
       note: "补齐试验数据",
       phase: "试验验证",
       nextAction: "完成热真空试验",
-      task: { text: "准备热真空试验数据", due: "2026-09-10" }
+      tasks: [
+        { text: "准备热真空试验数据", due: "2026-09-10" },
+        { text: "确认试验件状态" }
+      ]
     }, new Date(2026, 7, 29, 12));
 
     const after = await vault.read("projects/热控设计.md");
@@ -208,6 +220,7 @@ describe("ProjectReviewService", () => {
     expect(after).toContain("模板正文保持不变。");
     expect(after).toContain("- 2026-08-29：项目审阅结论为「附条件通过」；状态更新为「推进中」；研制阶段「试验验证」；下一步：完成热真空试验；补齐试验数据；复审 2026-09-15");
     expect(after).toContain("- [ ] 准备热真空试验数据 📅 2026-09-10 ^qwb-");
+    expect(after).toContain("- [ ] 确认试验件状态 ^qwb-");
     expect(after).toContain("| 2026-08-20 | 完成初审 |");
   });
 

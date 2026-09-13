@@ -29,10 +29,10 @@ export class ProjectReviewService {
     const typeTrace = input.decision === "赢单转交付" ? `；项目类型由「${input.currentProjectType}」转为「合同交付」` : "";
     const trace = `- ${date}：项目审阅结论为「${input.decision}」；状态更新为「${status}」${typeTrace}${input.phase?.trim() ? `；研制阶段「${input.phase.trim()}」` : ""}${input.nextAction?.trim() ? `；下一步：${input.nextAction.trim()}` : ""}${input.note?.trim() ? `；${input.note.trim()}` : ""}${input.reviewDue ? `；复审 ${input.reviewDue}` : ""}`;
     after = insertProgressTrace(after, trace);
-    if (input.task?.text.trim()) {
-      const text = input.task.text.trim();
-      const blockId = `qwb-${stableHash(`${path}\n${before.length}\n${text}`)}`;
-      after = appendToSection(after, "## 待办", renderTaskLine({ text, due: input.task.due, blockId }));
+    for (const [index, task] of (input.tasks ?? []).entries()) {
+      const text = task.text.trim();
+      const blockId = `qwb-${stableHash(`${path}\n${before.length}\n${index}\n${text}`)}`;
+      after = appendToSection(after, "## 待办", renderTaskLine({ text, due: task.due, blockId }));
     }
     return this.transactions.execute({
       label: `Review project: ${path}`,

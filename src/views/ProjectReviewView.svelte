@@ -6,6 +6,7 @@
     PROJECT_DEVELOPMENT_STAGES,
     projectReviewCandidates,
     projectReviewTriggers,
+    reconcileProjectReviewQueue,
     projectStatusForDecision,
     reviewTaskTitle,
     type ProjectReviewDecision
@@ -30,6 +31,7 @@
     { value: "暂缓", label: "暂缓", hint: "等待客户或条件" },
     { value: "停止", label: "关闭", hint: "结束跟进并归档" }
   ];
+  interface NewTaskDraft { id: number; text: string; due: string }
   let snapshot: WorkbenchSnapshot = controller.getSnapshot() ?? EMPTY_SNAPSHOT;
   let unsubscribe = () => {};
   let selectedPath = "";
@@ -42,13 +44,12 @@
   let nextAction = "";
   let reviewDue = "";
   let note = "";
-  let taskText = "";
-  let taskDue = "";
+  let newTasks: NewTaskDraft[] = [];
+  let nextTaskDraftId = 0;
   let editingTaskId = "";
   let taskEditDue = "";
   let taskEditScheduled = "";
   let showAllTasks = false;
-  let showNewTask = false;
   let taskEditPriority: NonNullable<TaskRecord["priority"]> = "normal";
   let taskBusyId = "";
   let busy = false;
@@ -85,6 +86,7 @@
   $: reviewedCount = filteredCandidatePaths.filter((path) => reviewed.has(path)).length;
   $: reviewDueRequired = decision === "附条件通过";
   $: canSave = Boolean(selected && decision && (!reviewDueRequired || reviewDue));
+  $: readyNewTaskCount = newTasks.filter((task) => task.text.trim()).length;
   $: mappedStatus = decision ? projectStatusForDecision(decision) : selected?.status || "未设置";
   $: decisionOptions = isPreSalesProject(selected?.projectType) ? presalesDecisions : standardDecisions;
   $: phaseOptions = PROJECT_DEVELOPMENT_STAGES.includes(phase as typeof PROJECT_DEVELOPMENT_STAGES[number])
@@ -94,11 +96,6 @@
   function obsidianIcon(node: HTMLElement, name: string) {
     setIcon(node, name);
     return { update(next: string) { setIcon(node, next); } };
-  }
-
-  function reconcileQueue(current: string[], paths: string[]): string[] {
-    const retained = current.filter((path) => paths.includes(path));
-    return [...retained, ...paths.filter((path) => !retained.includes(path))];
   }
 
   function chooseProjectTypeFilter(value: "全部" | ProjectType): void {
@@ -114,13 +111,11 @@
     const project = snapshot.projects.find((entry) => entry.path === path);
     decision = "";
     showAllTasks = false;
-    showNewTask = false;
     phase = project?.phase ?? "";
     nextAction = project?.nextAction ?? "";
     reviewDue = project?.reviewDue ?? "";
     note = project?.reviewNote ?? "";
-    taskText = "";
-    taskDue = "";
+    newTasks = [];
     editingTaskId = "";
     message = "";
   }
@@ -153,6 +148,15 @@
     decision = value;
     if (value === "已通过" || value === "赢单转交付" || value === "停止") reviewDue = "";
     if (value === "赢单转交付") phase = "方案定义";
+  }
+
+  function addNewTask(): void {
+    nextTaskDraftId += 1;
+    newTasks = [...newTasks, { id: nextTaskDraftId, text: "", due: "" }];
+  }
+
+  function removeNewTask(id: number): void {
+    newTasks = newTasks.filter((task) => task.id !== id);
   }
 
   function beginTaskUpdate(task: TaskRecord): void {
@@ -219,7 +223,9 @@
         nextAction: nextAction.trim() || undefined,
         reviewDue: reviewDue || undefined,
         note: note.trim() || undefined,
-        task: showNewTask && taskText.trim() ? { text: taskText.trim(), due: taskDue || undefined } : undefined
+        tasks: newTasks
+          .filter((task) => task.text.trim())
+          .map((task) => ({ text: task.text.trim(), due: task.due || undefined }))
       });
       messageTone = "ok";
       message = `已保存「${savingProject.name}」的审阅结论。`;
@@ -270,7 +276,7 @@
     unsubscribe = controller.subscribe((next) => {
       snapshot = next;
       const nextToday = formatDate(new Date(), "YYYY-MM-DD");
-      queueOrder = reconcileQueue(queueOrder, projectReviewCandidates(next.projects, nextToday, next.tasks).map((project) => project.path));
+      queueOrder = reconcileProjectReviewQueue(queueOrder, projectReviewCandidates(next.projects, nextToday, next.tasks).map((project) => project.path), selectedPath);
     });
   });
   onDestroy(() => unsubscribe());
@@ -391,12 +397,22 @@
               {:else}<p class="empty-text">项目页没有未完成任务。</p>{/each}
             </div>
             {#if evidence.openTasks.length > 6}<button class="review-text-button" on:click={() => showAllTasks = !showAllTasks}>{showAllTasks ? "收起任务" : `查看全部 ${evidence.openTasks.length} 项任务`}</button>{/if}
-            <button class="review-text-button" aria-expanded={showNewTask} on:click={() => showNewTask = !showNewTask}>{showNewTask ? "取消新增任务" : "新增任务"}</button>
-            {#if showNewTask}<div class="task-fields">
-              <label><span>任务内容</span><input bind:value={taskText} placeholder="输入明确、可执行的任务" /></label>
-              <label><span>截止日期（可选）</span><input bind:value={taskDue} type="date" /></label>
-              <small>随本次审阅一起保存</small>
-            </div>{/if}
+            <button class="review-text-button" aria-expanded={newTasks.length > 0} on:click={addNewTask}>{newTasks.length > 0 ? "继续添加任务" : "新增任务"}</button>
+            {#if newTasks.length > 0}
+              <div class="new-task-composer" aria-label="本次审阅新增任务">
+                <div class="new-task-heading"><span>待新增任务</span><small>{readyNewTaskCount} 条将随本次审阅保存</small></div>
+                <div class="new-task-list">
+                  {#each newTasks as task, index (task.id)}
+                    <div class="task-fields">
+                      <span class="task-number" aria-hidden="true">{index + 1}</span>
+                      <label><span>任务内容</span><input bind:value={task.text} aria-label={`第 ${index + 1} 条任务内容`} placeholder="输入明确、可执行的任务" /></label>
+                      <label><span>截止日期（可选）</span><input bind:value={task.due} aria-label={`第 ${index + 1} 条任务截止日期`} type="date" /></label>
+                      <button type="button" class="remove-task" aria-label={`移除第 ${index + 1} 条任务`} title="移除这条任务" on:click={() => removeNewTask(task.id)}><span use:obsidianIcon={"x"}></span></button>
+                    </div>
+                  {/each}
+                </div>
+              </div>
+            {/if}
           </article>
 
           <article class="review-card meeting-evidence">
@@ -804,22 +820,22 @@
   .decision-note:only-child { grid-column: 1 / -1; }
   .task-fields {
     display: grid;
-    grid-template-columns: minmax(150px, .7fr) minmax(260px, 1.7fr) minmax(150px, .65fr);
+    grid-template-columns: 28px minmax(260px, 1fr) 180px 36px;
     align-items: end;
     gap: 10px;
-    margin-top: 12px;
-    padding: 12px;
-    border: 1px solid var(--review-line);
-    border-radius: 12px;
-    background: var(--background-primary);
+    padding: 10px 12px;
+    border-top: 1px solid var(--review-line);
   }
-  .task-fields small { display: block; }
-  .task-fields small {
-    margin-top: 3px;
-    color: var(--text-muted);
-    font-size: 10px;
-    line-height: 1.45;
-  }
+  .task-fields:first-child { border-top: 0; }
+  .new-task-composer { margin-top: 10px; overflow: hidden; border: 1px solid var(--review-line); border-radius: 12px; background: var(--background-primary); }
+  .new-task-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; background: color-mix(in srgb, var(--background-secondary) 65%, var(--background-primary)); }
+  .new-task-heading span { font-size: 12px; font-weight: 700; }
+  .new-task-heading small { color: var(--text-muted); font-size: 11px; }
+  .new-task-list { display: grid; }
+  .task-number { align-self: center; color: var(--text-muted); font-size: 11px; font-weight: 700; text-align: center; }
+  .remove-task { display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--text-muted); cursor: pointer; }
+  .remove-task:hover { background: var(--background-modifier-hover); color: var(--text-normal); }
+  .remove-task span { width: 16px; height: 16px; }
   .decision-card footer {
     padding-top: 2px;
     border-top: 0;
@@ -844,13 +860,15 @@
   @media (max-width: 1120px) {
     .project-update-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .next-action-field { grid-column: 1 / -1; }
-    .task-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .task-fields { grid-template-columns: 28px minmax(0, 1fr) 160px 36px; }
   }
   @media (max-width: 760px) {
     .review-header { gap: 12px; }
     .review-heading h1 { font-size: 34px; }
     .project-update-fields,
-    .task-fields { grid-template-columns: 1fr; }
+    .task-fields { grid-template-columns: 28px minmax(0, 1fr) 36px; }
+    .task-fields label:nth-of-type(2) { grid-column: 2; }
+    .task-fields .remove-task { grid-column: 3; grid-row: 1 / span 2; align-self: center; }
     .next-action-field { grid-column: auto; }
     .decision-card > header { display: block; }
     .task-evidence-row { grid-template-columns: 36px minmax(0, 1fr) auto; }
@@ -897,8 +915,7 @@
   .task-evidence-row { grid-template-columns: 36px minmax(0, 1fr) auto auto; }
   .task-open strong { white-space: normal; overflow-wrap: anywhere; line-height: 1.5; }
   .task-quick-editor { grid-template-columns: repeat(3, minmax(0, 1fr)) auto; }
-  .task-fields { grid-template-columns: minmax(0, 1fr) 180px; }
-  .task-fields small { grid-column: 1 / -1; }
+  .task-fields { grid-template-columns: 28px minmax(0, 1fr) 180px 36px; }
   .review-text-button { margin-top: 12px; margin-right: 12px; min-height: 36px; background: transparent; border: 0; color: var(--text-accent); cursor: pointer; }
   .decision-card footer { align-items: center; flex-wrap: wrap; }
   .decision-card footer small { margin-right: auto; font-size: 12px; color: var(--text-muted); }
@@ -918,7 +935,10 @@
     .review-queue { position: static; min-height: 0; height: auto; max-height: 260px; }
     .queue-list { max-height: 160px; }
     .review-grid { grid-template-columns: 1fr; }
-    .project-update-fields, .decision-fields, .task-fields { grid-template-columns: 1fr; }
+    .project-update-fields, .decision-fields { grid-template-columns: 1fr; }
+    .task-fields { grid-template-columns: 28px minmax(0, 1fr) 36px; }
+    .task-fields label:nth-of-type(2) { grid-column: 2; }
+    .task-fields .remove-task { grid-column: 3; grid-row: 1 / span 2; align-self: center; }
     .task-quick-editor { grid-template-columns: 1fr 1fr; }
     .decision-options { grid-template-columns: 1fr 1fr; }
     .task-evidence-row { grid-template-columns: 36px minmax(0, 1fr) auto; }
