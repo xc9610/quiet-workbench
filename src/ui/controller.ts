@@ -69,6 +69,7 @@ export interface ContextSnapshot {
 }
 
 export interface WorkbenchSnapshot {
+  refreshError?: string;
   scannedAt?: number;
   diagnostics: DiagnosticItem[];
   projects: EntitySummary[];
@@ -118,9 +119,11 @@ export interface WorkbenchController {
   getSnapshot(): WorkbenchSnapshot;
   subscribe(listener: (snapshot: WorkbenchSnapshot) => void): () => void;
   refresh(): Promise<void>;
+  refreshVisible?(): Promise<void>;
   openWorkbench(): Promise<void>;
   openTaskBoard(): Promise<void>;
   openProjectReview(): Promise<void>;
+  setProjectAnimal(path: string, animalId: string): Promise<void>;
   openCalendar(): Promise<void>;
   openGlobalSearch(): Promise<void>;
   authorizeCalendar(): Promise<void>;

@@ -1,3 +1,5 @@
+import { RefreshCoordinator, type RefreshBatch } from "./core/refresh-coordinator";
+import { isProjectAnimalId } from "./ui/project-animals";
 import {
   addIcon,
   Notice,
@@ -41,7 +43,8 @@ import {
   type VaultPort
 } from "./services";
 import { isTasksApiV1 } from "./services/tasks-api-adapter";
-import { DEFAULT_SETTINGS, type QuietWorkbenchSettings } from "./settings";
+import { DEFAULT_SETTINGS, defaultCompanionForVault, type QuietWorkbenchSettings } from "./settings";
+import { CAPYBARA_ICON_ID, CAPYBARA_ICON_SVG, SLOTH_ICON_ID, SLOTH_ICON_SVG, companionIconName } from "./ui/companion-art";
 import { appendQuickMemoContent, normalizeQuickMemoEntry, recentQuickMemoEntries } from "./domain/memo";
 import { renderNoteMarkdown } from "./domain/note";
 import {
@@ -123,7 +126,23 @@ class ObsidianDiagnosticReader implements DiagnosticVaultReader {
   }
 }
 
-class PluginWorkbenchController implements WorkbenchController {
+export class PluginWorkbenchController implements WorkbenchController {
+  async setProjectAnimal(path: string, animalId: string): Promise<void> {
+    if (!path || (animalId && !isProjectAnimalId(animalId))) throw new Error("项目动物选项无效。");
+    const projectAnimals = { ...this.plugin.settings.projectAnimals };
+    if (animalId) projectAnimals[path] = animalId;
+    else delete projectAnimals[path];
+    const previous = this.plugin.settings.projectAnimals;
+    this.plugin.settings.projectAnimals = projectAnimals;
+    try {
+      await this.plugin.saveSettings();
+    } catch (error) {
+      this.plugin.settings.projectAnimals = previous;
+      throw error;
+    }
+    this.emit();
+  }
+
   private readonly listeners = new Set<(snapshot: WorkbenchSnapshot) => void>();
   private readonly vaultPort: ObsidianVaultAdapter;
   private readonly journal: TransactionJournal;
@@ -139,6 +158,38 @@ class PluginWorkbenchController implements WorkbenchController {
   private indexSignature: string;
   private current: WorkbenchSnapshot = structuredClone(EMPTY_SNAPSHOT);
   private disposed = false;
+  private staged?: WorkbenchSnapshot;
+  private readonly refreshCoordinator = new RefreshCoordinator(async (batch) => {
+    try { await this.refreshBatch(batch); }
+    catch (error) {
+      if (!this.disposed) { this.current = { ...this.current, refreshError: errorMessage(error) }; this.emit(); }
+      throw error;
+    }
+  }, () => this.publishRefresh());
+  private refreshedDay = "";
+
+  refresh(): Promise<void> { return this.refreshCoordinator.request({ full: true }); }
+
+  refreshVisible(): Promise<void> {
+    const day = formatDate(new Date(), "YYYY-MM-DD");
+    const changed = day !== this.refreshedDay;
+    return this.refreshCoordinator.request({ calendar: true, activity: changed });
+  }
+
+  schedulePaths(paths: string[], full = false): void {
+    const entityPaths = paths.filter((path) => path.toLowerCase().endsWith(".md") && this.index.includesPath(path));
+    this.refreshCoordinator.schedule({
+      full,
+      paths: entityPaths,
+      memo: paths.includes(this.plugin.settings.memoPath),
+      activity: true,
+      diagnostics: entityPaths.length > 0
+    }, (error) => console.error("Asterism automatic refresh failed", error));
+  }
+
+  private refreshPaths(paths: string[]): Promise<void> {
+    return this.refreshCoordinator.request({ paths, memo: paths.includes(this.plugin.settings.memoPath), activity: true, diagnostics: true });
+  }
 
   constructor(private readonly plugin: QuietWorkbenchPlugin, journalData?: PersistedPluginData["transactionJournal"]) {
     this.vaultPort = new ObsidianVaultAdapter(plugin.app.vault, plugin.app.fileManager);
@@ -190,27 +241,36 @@ class PluginWorkbenchController implements WorkbenchController {
     return () => this.listeners.delete(listener);
   }
 
-  async refresh(): Promise<void> {
+  private async refreshBatch(batch: RefreshBatch): Promise<void> {
     if (this.disposed) return;
     const nextSignature = this.makeIndexSignature();
     if (nextSignature !== this.indexSignature) {
       this.index = this.createIndex();
       this.indexSignature = nextSignature;
+      batch.full = true;
     }
+    const previous = this.staged ?? this.current;
     const calendarRange = scheduleReadRange();
-    const [update, report, memo, activity, calendar] = await Promise.all([
-      this.index.scan(),
-      this.diagnostics.run(this.plugin.settings),
-      this.readQuickMemo(),
-      this.readActivity(),
-      this.fullCalendar.snapshot(calendarRange.start, calendarRange.end)
+    const results = await Promise.allSettled([
+      batch.full ? this.index.scan() : this.refreshIndexPaths(batch.paths),
+      batch.full || batch.diagnostics ? this.diagnostics.run(this.plugin.settings) : undefined,
+      batch.full || batch.memo ? this.readQuickMemo() : previous.memo,
+      batch.full || batch.activity ? this.readActivity() : previous.activity,
+      batch.full || batch.calendar ? this.fullCalendar.snapshot(calendarRange.start, calendarRange.end) : previous.calendar
     ]);
-    const diagnostics: DiagnosticItem[] = report.items.map((item) => ({
+    const [update, report, memo, activity, calendar] = results.map((result) => {
+      if (result.status === "rejected") throw result.reason;
+      return result.value;
+    }) as [Awaited<ReturnType<EntityIndex["scan"]>> | { errors: { path: string; message: string }[] }, Awaited<ReturnType<DiagnosticService["run"]>> | undefined, WorkbenchSnapshot["memo"], ActivityDay[], WorkbenchSnapshot["calendar"]];
+    if (this.disposed) return;
+    if (batch.full || batch.calendar) this.refreshedDay = formatDate(new Date(), "YYYY-MM-DD");
+    if (update.errors.length) throw new Error(update.errors.map((error) => `${error.path}: ${error.message}`).join("; "));
+    const diagnostics: DiagnosticItem[] = report ? report.items.map((item) => ({
       id: item.id,
       label: item.title,
       detail: item.path ? `${item.detail} · ${item.path}` : item.detail,
       status: item.status === "pass" ? "ok" : item.status === "warn" ? "warning" : "ok"
-    }));
+    })) : previous.diagnostics.filter((item) => item.id !== "memo.path" && item.id !== "full-calendar.api");
     diagnostics.push(
       ...update.errors.map((error, index) => ({
         id: `index.${index}`,
@@ -235,9 +295,10 @@ class PluginWorkbenchController implements WorkbenchController {
         status: "warning"
       });
     }
-    this.current = {
-      ...this.current,
+    this.staged = {
+      ...previous,
       scannedAt: Date.now(),
+      refreshError: undefined,
       diagnostics,
       projects: this.summaries("project").filter((entry) => !isClosedStatus(entry.status)),
       clients: this.summaries("client"),
@@ -251,7 +312,23 @@ class PluginWorkbenchController implements WorkbenchController {
       memo,
       context: this.buildContext(this.current.context.path, this.current.context.surface)
     };
+  }
+
+  private publishRefresh(): void {
+    if (this.disposed || !this.staged) return;
+    this.current = {
+      ...this.staged,
+      lastReceipt: this.current.lastReceipt,
+      context: this.buildContext(this.current.context.path, this.current.context.surface)
+    };
+    this.staged = undefined;
     this.emit();
+  }
+
+  private async refreshIndexPaths(paths: Set<string>) {
+    const updates = [];
+    for (const path of paths) updates.push(await this.index.refreshPath(path));
+    return { errors: updates.flatMap((update) => update.errors) };
   }
 
   async openTaskBoard(): Promise<void> {
@@ -407,11 +484,10 @@ class PluginWorkbenchController implements WorkbenchController {
     this.requireWrites();
     const result = await this.meetingMigrations.migrate({ sourceTask: task, targetPath, targetScope: this.migrationTargetScope(targetPath) });
     if (!result.receipt) {
-      await this.index.refreshPath(task.path);
-      await this.refresh();
+      await this.refreshPaths([task.path]);
       return undefined;
     }
-    await this.index.refreshPath(task.path);
+    await this.refreshPaths([task.path]);
     await this.afterReceipt(result.receipt, targetPath);
     return result.receipt;
   }
@@ -610,6 +686,8 @@ class PluginWorkbenchController implements WorkbenchController {
 
   dispose(): void {
     this.disposed = true;
+    this.refreshCoordinator.dispose();
+    this.staged = undefined;
     this.listeners.clear();
   }
 
@@ -707,11 +785,8 @@ class PluginWorkbenchController implements WorkbenchController {
   }
 
   private async refreshMeetingBatchPaths(result: MeetingMigrationBatchResult): Promise<void> {
-    for (const path of new Set(result.items.flatMap((item) => [item.sourcePath, item.targetPath]))) {
-      await this.index.refreshPath(path);
-    }
     await this.persistJournal();
-    await this.refresh();
+    await this.refreshPaths(result.items.flatMap((item) => [item.sourcePath, item.targetPath]));
   }
 
   private isConfiguredTemplatePath(path: string): boolean {
@@ -745,9 +820,8 @@ class PluginWorkbenchController implements WorkbenchController {
 
   private async afterReceipt(receipt: DetailedTransactionReceipt, path?: string): Promise<void> {
     this.current = { ...this.current, lastReceipt: receipt };
-    if (path) await this.index.refreshPath(path);
     await this.persistJournal();
-    await this.refresh();
+    await this.refreshPaths(path ? [path, ...receipt.affectedPaths] : receipt.affectedPaths);
     if (receipt.status !== "committed") {
       const unresolved = receipt.unresolvedPaths.length ? ` 未恢复：${receipt.unresolvedPaths.join("、")}` : "";
       throw new Error(`操作未完成（${receipt.status}）。${receipt.messages.join(" ")}${unresolved}`);
@@ -775,7 +849,6 @@ class PluginWorkbenchController implements WorkbenchController {
 export default class QuietWorkbenchPlugin extends Plugin {
   settings: QuietWorkbenchSettings = structuredClone(DEFAULT_SETTINGS);
   private controller?: PluginWorkbenchController;
-  private refreshTimer?: number;
   private startupRefreshTimer?: number;
   private journalData?: PersistedPluginData["transactionJournal"];
   private lastPrimaryContext: { path?: string; surface: ContextSurface } = { surface: "note" };
@@ -784,6 +857,8 @@ export default class QuietWorkbenchPlugin extends Plugin {
     await this.loadSettings();
     this.applyAppearanceMode();
     addIcon(ASTERISM_ICON_ID, ASTERISM_ICON_SVG);
+    addIcon(CAPYBARA_ICON_ID, CAPYBARA_ICON_SVG);
+    addIcon(SLOTH_ICON_ID, SLOTH_ICON_SVG);
     this.controller = new PluginWorkbenchController(this, this.journalData);
 
     this.registerView(WORKBENCH_VIEW_TYPE, (leaf) => new WorkbenchItemView(leaf, this.requireController()));
@@ -796,7 +871,7 @@ export default class QuietWorkbenchPlugin extends Plugin {
     });
     this.addSettingTab(new QuietWorkbenchSettingTab(this.app, this));
 
-    this.addRibbonIcon(ASTERISM_ICON_ID, "打开 Asterism 工作台", () => void this.activateWorkbench());
+    this.addRibbonIcon(companionIconName(this.settings.companionName), this.settings.companionName ? `打开 ${this.settings.companionName} · ${this.settings.workspaceLabel || "工作台"}` : "打开 Asterism 工作台", () => void this.activateWorkbench());
     this.addRibbonIcon("list-todo", "打开任务看板", () => void this.activateTaskBoard());
     this.addRibbonIcon("clipboard-check", "打开项目审阅", () => void this.activateProjectReview());
     this.addCommand({ id: "open-workbench", name: "打开工作台", callback: () => void this.activateWorkbench() });
@@ -823,13 +898,21 @@ export default class QuietWorkbenchPlugin extends Plugin {
     this.registerObsidianProtocolHandler("asterism-task-board", () => void this.activateTaskBoard());
     this.registerObsidianProtocolHandler("asterism-project-review", () => void this.activateProjectReview());
 
-    this.registerEvent(this.app.workspace.on("active-leaf-change", () => void this.syncActiveFile()));
+    this.registerEvent(this.app.workspace.on("active-leaf-change", () => {
+      void this.syncActiveFile();
+    }));
+    const resumeRefresh = () => { if (!document.hidden) void this.controller?.refreshVisible().catch((error) => console.error("Asterism resume refresh failed", error)); };
+    this.registerDomEvent(document, "visibilitychange", resumeRefresh);
+    let localDay = formatDate(new Date(), "YYYY-MM-DD");
+    this.registerInterval(window.setInterval(() => {
+      const nextDay = formatDate(new Date(), "YYYY-MM-DD");
+      if (nextDay !== localDay) { localDay = nextDay; resumeRefresh(); }
+    }, 60_000));
     this.registerEvent(this.app.vault.on("create", (file) => this.scheduleRefresh(file)));
     this.registerEvent(this.app.vault.on("modify", (file) => this.scheduleRefresh(file)));
     this.registerEvent(this.app.vault.on("delete", (file) => this.scheduleRefresh(file)));
-    this.registerEvent(this.app.vault.on("rename", (file) => this.scheduleRefresh(file)));
+    this.registerEvent(this.app.vault.on("rename", (file, oldPath) => this.scheduleRefresh(file, oldPath)));
     this.register(() => {
-      if (this.refreshTimer !== undefined) window.clearTimeout(this.refreshTimer);
       if (this.startupRefreshTimer !== undefined) window.clearTimeout(this.startupRefreshTimer);
     });
 
@@ -921,18 +1004,26 @@ export default class QuietWorkbenchPlugin extends Plugin {
     const memoPath = !data?.memoPath || LEGACY_MEMO_PATHS.has(data.memoPath)
       ? DEFAULT_SETTINGS.memoPath
       : data.memoPath;
+    const companion = defaultCompanionForVault(this.app.vault.getName());
+    const seedCompanion = Boolean(companion && !data?.companionName);
+    const hero = seedCompanion && data?.hero?.mode === "daily" && !data.hero.customCopies?.length
+      ? { mode: "custom" as const, customCopies: [{ title: companion!.title, subtitle: companion!.subtitle }] }
+      : {
+          ...DEFAULT_SETTINGS.hero,
+          ...data?.hero,
+          customCopies: data?.hero?.customCopies ?? DEFAULT_SETTINGS.hero.customCopies
+        };
     this.settings = {
       ...structuredClone(DEFAULT_SETTINGS),
       ...data,
       appearanceMode: "clear",
+      companionName: data?.companionName || companion?.name || "",
+      workspaceLabel: data?.workspaceLabel || companion?.label || "",
       templates: normalizeTemplatePaths({ ...DEFAULT_SETTINGS.templates, ...data?.templates }),
       clientAliases: { ...DEFAULT_SETTINGS.clientAliases, ...data?.clientAliases },
       enabledPacks: { ...DEFAULT_SETTINGS.enabledPacks, ...data?.enabledPacks },
-      hero: {
-        ...DEFAULT_SETTINGS.hero,
-        ...data?.hero,
-        customCopies: data?.hero?.customCopies ?? DEFAULT_SETTINGS.hero.customCopies
-      },
+      projectAnimals: { ...DEFAULT_SETTINGS.projectAnimals, ...data?.projectAnimals },
+      hero,
       sidebarProfiles: { ...DEFAULT_SIDEBAR_PROFILES, ...data?.sidebarProfiles },
       memoPath,
       activeWorkbenchLayout: "workbench",
@@ -940,7 +1031,7 @@ export default class QuietWorkbenchPlugin extends Plugin {
       orderedGridVersion: ORDERED_GRID_VERSION,
       legacyPositionedLayouts
     };
-    if (data && (data.settingsSchemaVersion !== CURRENT_SETTINGS_SCHEMA_VERSION || needsOrderedGridMigration)) {
+    if (data && (data.settingsSchemaVersion !== CURRENT_SETTINGS_SCHEMA_VERSION || needsOrderedGridMigration || seedCompanion)) {
       await this.saveData({
         ...this.settings,
         settingsSchemaVersion: CURRENT_SETTINGS_SCHEMA_VERSION,
@@ -974,10 +1065,11 @@ export default class QuietWorkbenchPlugin extends Plugin {
     await this.requireController().setActivePath(this.lastPrimaryContext.path, this.lastPrimaryContext.surface);
   }
 
-  private scheduleRefresh(file: TAbstractFile): void {
+  private scheduleRefresh(file: TAbstractFile, oldPath?: string): void {
     if (!(file instanceof TFile || file instanceof TFolder)) return;
-    if (this.refreshTimer !== undefined) window.clearTimeout(this.refreshTimer);
-    this.refreshTimer = window.setTimeout(() => void this.refreshWorkbench(), 350);
+    const paths = [file.path, ...(oldPath ? [oldPath] : [])];
+    if (file instanceof TFile && !paths.some((path) => path.toLowerCase().endsWith(".md"))) return;
+    this.controller?.schedulePaths(paths, file instanceof TFolder);
   }
 
   private async rebindStaleViews(): Promise<void> {

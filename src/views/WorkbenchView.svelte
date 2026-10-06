@@ -1,5 +1,19 @@
 <script lang="ts">
   import { onDestroy, onMount, tick } from "svelte";
+  import WidgetFrame from "../ui/widgets/WidgetFrame.svelte";
+  import WidgetSettingsPanel from "../ui/widgets/WidgetSettingsPanel.svelte";
+  import { resolveWidgetRender } from "../ui/widgets/widget-renderers";
+  import { widgetRenderKind, type WidgetRenderContext } from "../ui/widgets/widget-props";
+  import { createBuiltinWidgetRegistry } from "../core/widget-registry";
+  import { sourceFilterFields } from "../core/widget-capabilities";
+  import { subscribeVisible } from "../ui/view-subscription";
+  let shellEl: HTMLElement;
+  let viewSubscription: ReturnType<typeof subscribeVisible> | undefined;
+  $: if (!layoutEditMode) viewSubscription?.flush();
+  const widgetRegistry = createBuiltinWidgetRegistry();
+  $: editingFields = sourceFilterFields(String(configSection(editingConfig, "source").kind ?? (editingWidget?.widgetId.startsWith("projects.") ? "projects" : "tasks")));
+  $: configIssues = editingWidget ? widgetRegistry.validateConfig(editingWidget.widgetId, editingConfig) : [];
+
   import { Platform, setIcon } from "obsidian";
   import type { EntityKind, LayoutItem, TaskRecord } from "../core/types";
   import type {
@@ -82,6 +96,9 @@
     type CalendarEntry
   } from "../domain/calendar-entries";
   import LayoutEditorBar from "../ui/LayoutEditorBar.svelte";
+  import CompanionArtwork from "../ui/CompanionArtwork.svelte";
+  import { companionIconName } from "../ui/companion-art";
+  import { PROJECT_ANIMALS, projectAnimalEmoji } from "../ui/project-animals";
   import SearchableSelect from "../ui/SearchableSelect.svelte";
   import type { SearchableOption } from "../ui/searchable-select";
   import { DEFAULT_PROJECT_NOTE_FOLDER } from "../domain/note";
@@ -598,6 +615,7 @@
 
   async function saveWidgetSettings(): Promise<void> {
     if (!editingWidget) return;
+    if (configIssues.length) throw new Error(configIssues.map((issue) => issue.message).join("；"));
     const key = itemKey(editingWidget);
     layoutUndo = recordLayoutHistory(layoutUndo, items);
     items = items.map((item) => itemKey(item) === key ? {
@@ -1291,7 +1309,7 @@
     void tick().then(() => noteTitleInput?.focus());
   }
 
-  function focusDialog(node: HTMLElement) {
+  function focusDialog(node: HTMLElement, close: () => void = () => (dialog = null)) {
     const previous = document.activeElement as HTMLElement | null;
     const controls = () => [...node.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary, [tabindex="0"]')]
       .filter((element) => element.getClientRects().length > 0);
@@ -1299,7 +1317,7 @@
     const keydown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.stopPropagation();
-        if (!busy) dialog = null;
+        if (!busy) close();
       }
       if (event.key !== "Tab") return;
       const items = controls();
@@ -1627,6 +1645,92 @@
     return rows;
   }
 
+  // Assignments live in plain functions so the reactive graph stays acyclic.
+  function setSharedPath(kind: "project" | "client" | "meeting" | "supplier", path: string): void {
+    if (kind === "project") sharedProjectPath = path;
+    else if (kind === "client") sharedClientPath = path;
+    else if (kind === "meeting") sharedMeetingPath = path;
+    else sharedSupplierPath = path;
+  }
+
+  function setWidgetSearchValue(key: string, value: string): void {
+    widgetSearch = { ...widgetSearch, [key]: value };
+  }
+
+  function setMemoDraftValue(value: string): void {
+    memoDraft = value;
+  }
+
+  function attachMemoTextarea(node: HTMLTextAreaElement): void {
+    memoInput = node;
+  }
+
+  $: renderContext = (item: LayoutItem): WidgetRenderContext => ({
+    item,
+    source: dataSource(item),
+    variant: displayVariant(item),
+    query: queryMode(item),
+    key: itemKey(item),
+    busy,
+    writesEnabled: controller.settings.writesEnabled,
+    search: widgetSearch[itemKey(item)] ?? "",
+    snapshot,
+    controller,
+    entities: {
+      selectedProject,
+      selectedClient,
+      selectedMeeting,
+      selectedSupplier,
+      projectsForClient,
+      tasksForClient,
+      meetingsForClient,
+      openTaskCountFor: (path: string) => snapshot.tasks.filter((task) => task.path === path && !task.completed).length,
+      projectHealth,
+      projectClientLabel,
+      projectUpdatedLabel,
+      projectAnimalValue: (path: string) => controller.settings.projectAnimals[path] ?? "",
+      setProjectAnimal: (path: string, value: string) => controller.setProjectAnimal(path, value)
+    },
+    shared: { project: sharedProjectPath, client: sharedClientPath, meeting: sharedMeetingPath, supplier: sharedSupplierPath },
+    setShared: setSharedPath,
+    taskRowsForWidget,
+    scopedTasks,
+    scopeLabel,
+    priorityLabel,
+    onSearch: (value: string) => setWidgetSearchValue(itemKey(item), value),
+    onCompleteTask: (task, completed) => run(() => controller.updateTask(task, { completed }), "任务状态已更新"),
+    onOpenPath: (path: string) => controller.openPath(path),
+    onOpenYolo: (path: string) => controller.openYolo(path),
+    onMigrateTask: openMigration,
+    onScheduleTask: openTaskSchedule,
+    onEditTask: openTaskEdit,
+    onAddTask: () => openTask(scopedProjectPath(item)),
+    onRetry: () => run(() => controller.refresh(), "刷新完成"),
+    memoDraft,
+    onMemoInput: setMemoDraftValue,
+    onMemoKeydown: handleMemoKeydown,
+    onMemoSubmit: submitQuickMemo,
+    onMemoOpenFile: () => run(() => controller.openPath(snapshot.memo.path), "已打开速记文件"),
+    onMemoYolo: () => run(openMemoYolo, "已打开 YOLO；整理说明已复制，请粘贴到输入框。"),
+    registerMemoTextarea: attachMemoTextarea,
+    isScheduleOverview,
+    calendarMonthLabel: (target: LayoutItem) => calendarMonthLabel(calendarState(target, calendarViewStates[itemKey(target)]).month),
+    calendarCells: (target: LayoutItem) => calendarCells(target, calendarViewStates[itemKey(target)]),
+    calendarSelected: (target: LayoutItem) => calendarState(target, calendarViewStates[itemKey(target)]).selected,
+    calendarSelectedLabel: (target: LayoutItem) => calendarDateLabel(calendarState(target, calendarViewStates[itemKey(target)]).selected),
+    calendarEntriesForDate: (target: LayoutItem, date: string) => calendarEntries(target).filter((entry) => entry.date === date),
+    calendarDotClass,
+    calendarAgenda: (target: LayoutItem) => scheduleAgendaGroups(target).map((group) => ({ ...group, label: calendarDateLabel(group.date) })),
+    calendarIntegration: { state: snapshot.calendar.state, title: calendarIntegrationTitle() },
+    calendarTodayTasks: () => calendarTasks().map((task) => ({ path: task.path, due: task.due, text: task.text })),
+    calendarToday: { day: new Date().getDate(), label: new Intl.DateTimeFormat("zh-CN", { month: "long", weekday: "long" }).format(new Date()) },
+    onMoveMonth: (target: LayoutItem, offset: number) => moveCalendarMonth(target, offset),
+    onCalendarToday: (target: LayoutItem) => resetCalendarToday(target),
+    onSelectDate: (target: LayoutItem, date: string) => setCalendarDate(target, date),
+    onOpenCalendarEntry: openCalendarEntry,
+    onOpenCalendarIntegration: () => run(useCalendarIntegration, "日程已打开")
+  });
+
   onMount(() => {
     hydrateFocusFilters();
     document.addEventListener("pointerdown", handleDocumentPointerDown);
@@ -1636,7 +1740,8 @@
       gridResizeObserver.observe(gridEl);
       updateGridMetrics();
     }
-    unsubscribe = controller.subscribe((next) => (snapshot = next));
+    viewSubscription = subscribeVisible(controller, shellEl, (next) => (snapshot = next), () => layoutEditMode);
+    unsubscribe = () => viewSubscription?.dispose();
     return () => {
       document.removeEventListener("pointerdown", handleDocumentPointerDown);
       document.removeEventListener("keydown", handleDocumentKeydown);
@@ -1647,10 +1752,14 @@
   onDestroy(() => unsubscribe());
 </script>
 
-<div class:layout-editing={layoutEditMode} class="qwb-shell" data-scene={activeScene}>
-  <header class="qwb-hero">
-    <div class="qwb-hero-topline"><span>ASTERISM · 星序 · {UI_VERSION}</span><div class="qwb-hero-topline-meta"><span use:obsidianIcon={heroStatusIcon()} class:enabled={heroStatus.tone === "enabled"} class:error={heroStatus.tone === "error"} class="qwb-hero-inline-status" role="status" aria-label={heroStatus.label} title={heroStatus.label}></span><time>{heroDate()}</time></div></div>
-    <div class="qwb-hero-symbol" aria-hidden="true"><span use:obsidianIcon={"asterism-mark"}></span><i use:obsidianIcon={"sparkles"}></i></div>
+<div bind:this={shellEl} class:layout-editing={layoutEditMode} class="qwb-shell" data-scene={activeScene}>
+  <header class="qwb-hero" data-companion={controller.settings.heroBackgroundMode === "animal" ? controller.settings.companionName : ""}>
+    <div class="qwb-hero-topline"><span>{controller.settings.companionName ? `${controller.settings.companionName} · ${controller.settings.workspaceLabel || "工作台"} · ASTERISM ${UI_VERSION}` : `ASTERISM · 星序 · ${UI_VERSION}`}</span><div class="qwb-hero-topline-meta"><span use:obsidianIcon={heroStatusIcon()} class:enabled={heroStatus.tone === "enabled"} class:error={heroStatus.tone === "error"} class="qwb-hero-inline-status" role="status" aria-label={heroStatus.label} title={heroStatus.label}></span><time>{heroDate()}</time></div></div>
+    {#if controller.settings.heroBackgroundMode === "animal" && controller.settings.companionName === "慢慢"}
+      <CompanionArtwork companionName={controller.settings.companionName} />
+    {:else}
+      <div class="qwb-hero-symbol" aria-hidden="true"><span use:obsidianIcon={"asterism-mark"}></span><i use:obsidianIcon={"sparkles"}></i></div>
+    {/if}
     <div class="qwb-hero-main">
       {#key `${heroCopy.title}|${heroCopy.subtitle}`}
         <div class="qwb-hero-copy">
@@ -1660,7 +1769,7 @@
         </div>
       {/key}
       <div class="qwb-header-actions qwb-page-nav" role="toolbar" aria-label="Asterism 页面导航与操作">
-        <button use:obsidianIcon={"asterism-mark"} class="qwb-hero-action is-current" aria-label="当前页面：工作台" title="工作台" aria-current="page" on:click={() => controller.openWorkbench()}></button>
+        <button use:obsidianIcon={companionIconName(controller.settings.companionName)} class="qwb-hero-action is-current" aria-label="当前页面：工作台" title="工作台" aria-current="page" on:click={() => controller.openWorkbench()}></button>
         <button use:obsidianIcon={"list-todo"} class="qwb-hero-action" aria-label="打开任务看板" title="任务看板" on:click={() => controller.openTaskBoard()}></button>
         <button use:obsidianIcon={"clipboard-check"} class="qwb-hero-action" aria-label="打开项目审阅" title="项目审阅" on:click={() => controller.openProjectReview()}></button>
         <button use:obsidianIcon={"calendar-days"} class="qwb-hero-action" aria-label="打开完整日程" title="完整日程" on:click={() => run(() => controller.openCalendar())}></button>
@@ -1713,26 +1822,20 @@
   {#key activeScene}
     <div class="qwb-grid" bind:this={gridEl}>
     {#each items.filter((item) => !item.hidden && enabled(item)) as item, itemIndex (itemKey(item))}
-      <section data-instance-id={itemKey(item)} class:collapsed={item.collapsed} class:editing={layoutEditMode} class="qwb-widget" style={itemStyle(item)}>
-        <header class="qwb-widget-header">
-          {#if layoutEditMode}
-            <span class="qwb-layout-order" aria-label={`布局顺序 ${itemIndex + 1}`}>{itemIndex + 1}</span>
-          {/if}
-          <h2>{widgetTitle(item)}</h2>
-          {#if layoutEditMode}
-            <div class="qwb-widget-controls">
+      <WidgetFrame instanceId={itemKey(item)} title={widgetTitle(item)} collapsed={Boolean(item.collapsed)} editing={layoutEditMode} order={itemIndex + 1} style={itemStyle(item)}>
+            <div slot="actions" class="qwb-widget-controls">
+              {#if layoutEditMode}
               <button use:obsidianIcon={"arrow-left"} aria-label={`将${widgetTitle(item)}前移`} title="前移" disabled={itemIndex === 0} on:click={() => moveItem(itemKey(item), -1)}></button>
               <button use:obsidianIcon={"arrow-right"} aria-label={`将${widgetTitle(item)}后移`} title="后移" disabled={itemIndex === items.filter((candidate) => !candidate.hidden && enabled(candidate)).length - 1} on:click={() => moveItem(itemKey(item), 1)}></button>
               <button use:obsidianIcon={"settings-2"} aria-label="组件设置" title="组件设置" on:click={() => openWidgetSettings(item)}></button>
               <button use:obsidianIcon={item.collapsed ? "chevron-down" : "chevron-up"} aria-label={item.collapsed ? "展开" : "折叠"} title={item.collapsed ? "展开" : "折叠"} on:click={() => setItemState(itemKey(item), { collapsed: !item.collapsed })}></button>
               <button use:obsidianIcon={"eye-off"} aria-label="隐藏" title="隐藏组件" on:click={() => setItemState(itemKey(item), { hidden: true })}></button>
+              {/if}
             </div>
-          {/if}
-        </header>
-
-        {#if !item.collapsed}
-          <div class="qwb-widget-body">
-            {#if item.widgetId === "core.quick-create"}
+            {#if widgetRenderKind(item, dataSource(item), displayVariant(item))}
+              {@const render = resolveWidgetRender(item, renderContext(item))}
+              {#if render}<svelte:component this={render.component} {...render.props} />{/if}
+            {:else if item.widgetId === "core.quick-create"}
               <div class="qwb-create-grid">
                 <button on:click={openNote}><span>＋</span>笔记</button>
                 <button on:click={() => openCreate("project")}><span>＋</span>项目</button>
@@ -1800,14 +1903,6 @@
                   </div>
                 </div>
               {/if}
-            {:else if item.widgetId === "tasks.list" || item.widgetId === "projects.tasks-list" || (item.widgetId === "view.list" && dataSource(item) === "tasks" && !["project-matrix", "client-groups"].includes(displayVariant(item)))}
-              <div class="qwb-widget-search"><input value={widgetSearch[itemKey(item)] ?? ""} placeholder="搜索任务" on:input={(event) => (widgetSearch = { ...widgetSearch, [itemKey(item)]: (event.currentTarget as HTMLInputElement).value })} /><span>{scopedTasks(item).length}</span></div>
-              <div class="qwb-task-list">
-                {#each taskRowsForWidget(item) as task (task.id)}
-                  <div class="qwb-task-row"><input type="checkbox" checked={task.completed} disabled={!controller.settings.writesEnabled || busy || task.scope === "meeting-draft"} on:change={(event) => run(() => controller.updateTask(task, { completed: (event.currentTarget as HTMLInputElement).checked }), "任务状态已更新")} /><button class="qwb-link" title={task.text} on:click={() => controller.openPath(task.path)}><span class="qwb-task-title-text">{task.text}</span></button><div class="qwb-task-meta"><span class="qwb-task-source" title={`${scopeLabel(task.scope)} · ${task.sourceName}`}><b>{scopeLabel(task.scope)}</b><em>{task.sourceName}</em></span><time>{effectiveTaskDate(task) ?? "未安排"}</time>{#if task.priority && task.priority !== "normal"}<span class:high={task.priority === "highest" || task.priority === "high"} class="qwb-task-priority">{priorityLabel(task.priority)}</span>{/if}</div>{#if task.scope === "meeting-draft"}<button class="qwb-row-action" disabled={!controller.settings.writesEnabled} on:click={() => openMigration(task)}>迁移</button>{:else}<div class="qwb-row-actions"><button class="qwb-row-action" disabled={!controller.settings.writesEnabled} on:click={() => openTaskSchedule(task)}>安排</button><button class="qwb-row-action" on:click={() => openTaskEdit(task)}>编辑</button></div>{/if}</div>
-                {:else}<p class="qwb-empty">当前组件范围内没有任务。</p>{/each}
-              </div>
-              {#if queryMode(item) !== "client-actions"}<button class="qwb-text-action" on:click={() => openTask(scopedProjectPath(item))}>＋ 添加项目任务</button>{/if}
             {:else if item.widgetId === "tasks.board" || item.widgetId === "projects.tasks-board" || (item.widgetId === "view.board" && dataSource(item) === "tasks")}
               <div class="qwb-board">
                 {#each [["overdue", "逾期"], ["today", "今天"], ["week", "本周"], ["later", "以后"], ["unscheduled", "未安排"]] as column}
@@ -1827,63 +1922,6 @@
                   </section>
                 {/each}
               </div>
-            {:else if item.widgetId === "tasks.calendar" || item.widgetId === "view.calendar"}
-              {#if isScheduleOverview(item)}
-                <div class="qwb-schedule-overview">
-                  <header class="qwb-schedule-overview-header">
-                    <span><strong>未来 7 天</strong><small>计划任务、会议与外部日程</small></span>
-                    <button use:obsidianIcon={snapshot.calendar.state === "ready" ? "calendar-clock" : "plug-zap"} class:active={snapshot.calendar.state === "ready"} disabled={snapshot.calendar.state === "unavailable"} aria-label={calendarIntegrationTitle()} title={calendarIntegrationTitle()} on:click={() => run(useCalendarIntegration, "日程已打开")}></button>
-                  </header>
-                  <div class="qwb-schedule-agenda">
-                    {#each scheduleAgendaGroups(item) as group (group.date)}
-                      <section>
-                        <header><time>{calendarDateLabel(group.date)}</time><span>{group.entries.length} 项</span></header>
-                        <div>
-                          {#each group.entries as entry (entry.id)}
-                            <button class:completed={entry.completed} on:click={() => openCalendarEntry(entry)}>
-                              <time>{entry.time || "全天"}</time>
-                              <i class={calendarDotClass(entry)}></i>
-                              <span><strong>{entry.title}</strong><small>{entry.subtitle}</small></span>
-                              <em>{entry.kind === "meeting" ? "会议" : entry.kind === "event" ? "日程" : "计划"}</em>
-                            </button>
-                          {/each}
-                        </div>
-                      </section>
-                    {:else}
-                      <div class="qwb-schedule-empty"><i use:obsidianIcon={"calendar-check"}></i><strong>未来 7 天没有已安排日程</strong><small>只有截止日期的任务会留在“任务日历”。</small></div>
-                    {/each}
-                  </div>
-                </div>
-              {:else}
-                <div class="qwb-month-calendar">
-                  <header class="qwb-month-calendar-toolbar">
-                    <button use:obsidianIcon={"chevron-left"} aria-label="上个月" title="上个月" on:click={() => moveCalendarMonth(item, -1)}></button>
-                    <strong>{calendarMonthLabel(calendarState(item, calendarViewStates[itemKey(item)]).month)}</strong>
-                    <button class="qwb-calendar-today" on:click={() => resetCalendarToday(item)}>今天</button>
-                    <button use:obsidianIcon={"chevron-right"} aria-label="下个月" title="下个月" on:click={() => moveCalendarMonth(item, 1)}></button>
-                  </header>
-                  <div class="qwb-month-calendar-weekdays" aria-hidden="true">{#each ["一", "二", "三", "四", "五", "六", "日"] as weekday}<span>{weekday}</span>{/each}</div>
-                  <div class="qwb-month-calendar-grid">
-                    {#each calendarCells(item, calendarViewStates[itemKey(item)]) as cell (cell.date)}
-                      <button class:outside={!cell.inMonth} class:today={cell.isToday} class:selected={calendarState(item, calendarViewStates[itemKey(item)]).selected === cell.date} aria-label={`${cell.date}，${calendarEntriesForDate(item, cell.date).length} 项`} title={`${cell.date} · ${calendarEntriesForDate(item, cell.date).length} 项`} on:click={() => setCalendarDate(item, cell.date)}>
-                        <time>{cell.day}</time>
-                        <span class="qwb-calendar-dots">
-                          {#each calendarEntriesForDate(item, cell.date).slice(0, 3) as entry (entry.id)}<i class={calendarDotClass(entry)}></i>{/each}
-                          {#if calendarEntriesForDate(item, cell.date).length > 3}<small>{calendarEntriesForDate(item, cell.date).length}</small>{/if}
-                        </span>
-                      </button>
-                    {/each}
-                  </div>
-                  <section class="qwb-calendar-detail">
-                    <header><strong>{calendarDateLabel(calendarState(item, calendarViewStates[itemKey(item)]).selected)}</strong><span>{calendarEntriesForDate(item, calendarState(item, calendarViewStates[itemKey(item)]).selected).length} 项</span></header>
-                    <div>
-                      {#each calendarEntriesForDate(item, calendarState(item, calendarViewStates[itemKey(item)]).selected) as entry (entry.id)}
-                        <button class:overdue={entry.overdue} class:completed={entry.completed} on:click={() => openCalendarEntry(entry)}><i class={calendarDotClass(entry)}></i><span><strong>{entry.title}</strong><small>{entry.subtitle}</small></span><em>{entry.kind === "meeting" ? "会议" : entry.completed ? "已完成" : "截止"}</em></button>
-                      {:else}<p class="qwb-empty">这一天没有{dataSource(item) === "meetings" ? "会议" : "截止任务"}。</p>{/each}
-                    </div>
-                  </section>
-                </div>
-              {/if}
             {:else if item.widgetId === "tasks.quadrant" || (item.widgetId === "view.quadrant" && dataSource(item) === "tasks")}
               <div class="qwb-quadrants">
                 {#each [["important-urgent", "重要且紧急"], ["important", "重要不紧急"], ["urgent", "紧急不重要"], ["later", "不重要不紧急"]] as quadrant}
@@ -1937,24 +1975,6 @@
             {:else if item.widgetId.startsWith("tasks.")}
               <div class="qwb-task-list">{#each scopedTasks(item) as task (task.id)}<div class="qwb-task-row"><input type="checkbox" checked={task.completed} disabled={!controller.settings.writesEnabled || task.scope === "meeting-draft"} on:change={(event) => run(() => controller.updateTask(task, { completed: (event.currentTarget as HTMLInputElement).checked }), "任务状态已更新")} /><button class="qwb-link" title={task.text} on:click={() => controller.openPath(task.path)}><span class="qwb-task-title-text">{task.text}</span></button><div class="qwb-task-meta"><span class="qwb-task-source" title={task.sourceName}><em>{task.sourceName}</em></span>{#if effectiveTaskDate(task)}<time>{effectiveTaskDate(task)}</time>{/if}{#if task.priority && task.priority !== "normal"}<span class:high={task.priority === "highest" || task.priority === "high"} class="qwb-task-priority">{priorityLabel(task.priority)}</span>{/if}</div><button class="qwb-row-action" on:click={() => openTaskEdit(task)}>编辑</button></div>{:else}<p class="qwb-empty">暂无任务。</p>{/each}</div>
               <button class="qwb-text-action" on:click={() => openTask(scopedProjectPath(item))}>＋ 添加项目任务</button>
-            {:else if item.widgetId === "capture.memo"}
-              <div class="qwb-memo-compose">
-                <textarea bind:this={memoInput} bind:value={memoDraft} rows="3" placeholder="记下一条；时间会自动添加。" on:keydown={handleMemoKeydown}></textarea>
-                <div><small>Enter 记录 · Shift + Enter 换行</small><button disabled={!controller.settings.writesEnabled || !memoDraft.trim() || busy} on:click={submitQuickMemo}>记录一条</button><button disabled={!snapshot.memo.exists} title={snapshot.memo.path || "尚未创建速记文件"} on:click={() => run(() => controller.openPath(snapshot.memo.path), "已打开速记文件")}>打开文件</button><button disabled={!snapshot.memo.exists} on:click={() => run(openMemoYolo, "已打开 YOLO；整理说明已复制，请粘贴到输入框。")}>YOLO 整理今日</button></div>
-              </div>
-              {#if snapshot.memo.error}<p class="qwb-inline-error">{snapshot.memo.error}</p>{/if}
-              <div class="qwb-memo-recent">
-                {#each snapshot.memo.recent as entry}<button on:click={() => controller.openPath(snapshot.memo.path)}><time>{entry.time || "—"}</time><span>{entry.text}</span><small>{entry.date === formatDate(new Date(), "YYYY-MM-DD") ? "今天" : entry.date}</small></button>{:else}<p class="qwb-empty">尚无速记。首次记录会创建配置的速记文件。</p>{/each}
-              </div>
-            {:else if item.widgetId === "core.calendar"}
-              <div class="qwb-calendar-date"><strong>{new Date().getDate()}</strong><span>{new Intl.DateTimeFormat("zh-CN", { month: "long", weekday: "long" }).format(new Date())}</span></div>
-              <div class="qwb-calendar-lines">
-                {#each calendarTasks() as task}
-                  <button on:click={() => controller.openPath(task.path)}><time>{task.due}</time><span>{task.text}</span></button>
-                {:else}
-                  <p class="qwb-empty">今天没有已标记日期的任务。</p>
-                {/each}
-              </div>
             {:else if item.widgetId === "projects.search" || item.widgetId === "control.selector"}
               {#if dataSource(item) === "clients"}
                 {#if sharedClient()}<div class="qwb-shared-project"><span><small>当前共享客户</small><strong>{sharedClient()!.name}</strong></span><button on:click={() => controller.openPath(sharedClient()!.path)}>打开</button><button on:click={() => (sharedClientPath = "")}>清除</button></div>{/if}
@@ -1969,11 +1989,11 @@
               {:else}
                 {#if sharedProject()}<div class="qwb-shared-project"><span><small>当前共享项目</small><strong>{sharedProject()!.name}</strong></span><button on:click={() => controller.openPath(sharedProject()!.path)}>打开</button><button on:click={() => (sharedProjectPath = "")}>清除</button></div>{/if}
                 <div class="qwb-widget-search"><input value={widgetSearch[itemKey(item)] ?? ""} placeholder="搜索项目名称、客户或类型" on:input={(event) => (widgetSearch = { ...widgetSearch, [itemKey(item)]: (event.currentTarget as HTMLInputElement).value })} /><span>{scopedProjects(item).length}</span></div>
-                <div class="qwb-project-search-results">{#each scopedProjects(item).slice(0, 8) as project}<div class:active={sharedProjectPath === project.path}><button class="qwb-project-choice" on:click={() => (sharedProjectPath = project.path)}><strong>{project.name}</strong><span><small>{projectClientLabel(project)}</small><small>{project.projectType || "未分类"}</small><small>{projectStatusLabel(project.status)}</small></span></button><div class="qwb-project-choice-actions"><button class:active={sharedProjectPath === project.path} on:click={() => (sharedProjectPath = project.path)}>{sharedProjectPath === project.path ? "已选择" : "选择"}</button><button on:click={() => controller.openPath(project.path)}>打开</button></div></div>{:else}<p class="qwb-empty">没有匹配项目。</p>{/each}</div>
+                <div class="qwb-project-search-results">{#each scopedProjects(item).slice(0, 8) as project}<div class:active={sharedProjectPath === project.path}><button class="qwb-project-choice" on:click={() => (sharedProjectPath = project.path)}><strong>{#if projectAnimalEmoji(controller.settings.projectAnimals[project.path])}<span class="qwb-project-animal">{projectAnimalEmoji(controller.settings.projectAnimals[project.path])}</span>{/if}{project.name}</strong><span><small>{projectClientLabel(project)}</small><small>{project.projectType || "未分类"}</small><small>{projectStatusLabel(project.status)}</small></span></button><div class="qwb-project-choice-actions"><button class:active={sharedProjectPath === project.path} on:click={() => (sharedProjectPath = project.path)}>{sharedProjectPath === project.path ? "已选择" : "选择"}</button><button on:click={() => controller.openPath(project.path)}>打开</button></div></div>{:else}<p class="qwb-empty">没有匹配项目。</p>{/each}</div>
               {/if}
             {:else if item.widgetId === "projects.list" || (item.widgetId === "view.list" && dataSource(item) === "projects" && !["risks", "milestones"].includes(queryMode(item)))}
               <div class="qwb-widget-search"><input value={widgetSearch[itemKey(item)] ?? ""} placeholder="搜索项目" on:input={(event) => (widgetSearch = { ...widgetSearch, [itemKey(item)]: (event.currentTarget as HTMLInputElement).value })} /><span>{scopedProjects(item).length}</span></div>
-              <div class="qwb-project-table">{#each projectRowsForWidget(item) as project}<button on:click={() => controller.openPath(project.path)}><span><strong>{project.name}</strong><small>{project.client || "未关联客户"}</small></span><em>{project.projectType || "未分类"}</em><em>{projectStatusLabel(project.status)}</em><time>{project.phase || ""}</time></button>{:else}<p class="qwb-empty">没有匹配项目。</p>{/each}</div>
+              <div class="qwb-project-table">{#each projectRowsForWidget(item) as project}<button on:click={() => controller.openPath(project.path)}><span><strong>{#if projectAnimalEmoji(controller.settings.projectAnimals[project.path])}<span class="qwb-project-animal">{projectAnimalEmoji(controller.settings.projectAnimals[project.path])}</span>{/if}{project.name}</strong><small>{project.client || "未关联客户"}</small></span><em>{project.projectType || "未分类"}</em><em>{projectStatusLabel(project.status)}</em><time>{project.phase || ""}</time></button>{:else}<p class="qwb-empty">没有匹配项目。</p>{/each}</div>
             {:else if item.widgetId === "view.board" && dataSource(item) === "clients"}
               <div class="qwb-board qwb-client-board">
                 {#each clientStatusGroups(item) as group}<section><header><strong>{group[0]}</strong><span>{group[1].length}</span></header><div class="qwb-board-column-body">{#each group[1] as client}<article class="qwb-board-card"><button class="qwb-board-card-main" on:click={() => controller.openPath(client.path)}><strong>{client.name}</strong><small>{client.organizationType || client.businessDomains || "客户"}</small><time>{client.followupDate || "未安排跟进"}</time></button></article>{/each}</div></section>{:else}<p class="qwb-empty">暂无客户关系数据。</p>{/each}
@@ -1991,7 +2011,7 @@
                       {#each group[1] as project}
                         <article class="qwb-board-card">
                           <button class="qwb-board-card-main" on:click={() => controller.openPath(project.path)}>
-                            <strong>{project.name}</strong>
+                            <strong>{#if projectAnimalEmoji(controller.settings.projectAnimals[project.path])}<span class="qwb-project-animal">{projectAnimalEmoji(controller.settings.projectAnimals[project.path])}</span>{/if}{project.name}</strong>
                             <small>{project.client || project.projectType || "开放项目"}</small>
                             {#if project.phase}<time>{project.phase}</time>{/if}
                           </button>
@@ -2001,20 +2021,10 @@
                   </section>
                 {:else}<p class="qwb-empty">暂无项目。</p>{/each}
               </div>
-            {:else if item.widgetId === "projects.summary" || item.widgetId === "view.detail"}
-              {#if dataSource(item) === "clients"}
-                {#each selectedClient(item) ? [selectedClient(item)!] : [] as client}<div class="qwb-project-summary qwb-client-summary"><button class="qwb-summary-title" on:click={() => controller.openPath(client.path)}><span class="qwb-entity-icon client">C</span><span><strong>{client.name}</strong><small>{client.businessDomains || "未填写业务领域"}</small></span><em>{client.relationshipStatus || "未设置"}</em></button><dl><div><dt>机构类型</dt><dd>{client.organizationType || "未设置"}</dd></div><div><dt>关系状态</dt><dd>{client.relationshipStatus || "未设置"}</dd></div><div><dt>跟进日期</dt><dd>{client.followupDate || "未安排"}</dd></div><div><dt>开放项目</dt><dd>{projectsForClient(client.path).length}</dd></div><div><dt>未完成行动</dt><dd>{tasksForClient(client.path).length}</dd></div><div><dt>相关会议</dt><dd>{meetingsForClient(client.path).length}</dd></div></dl><div class="qwb-project-next"><small>客户摘要</small><p>{client.detail || "尚未填写客户摘要。"}</p></div><div class="qwb-summary-actions"><button disabled={sharedClientPath === client.path} on:click={() => (sharedClientPath = client.path)}>{sharedClientPath === client.path ? "当前共享客户" : "设为共享客户"}</button><button on:click={() => controller.openPath(client.path)}>打开客户</button><button on:click={() => controller.openYolo(client.path)}>YOLO</button></div></div>{:else}<p class="qwb-empty">请先用客户选择器选择客户。</p>{/each}
-              {:else if dataSource(item) === "meetings"}
-                {#each selectedMeeting(item) ? [selectedMeeting(item)!] : [] as meeting}<div class="qwb-project-summary"><button class="qwb-summary-title" on:click={() => controller.openPath(meeting.path)}><span class="qwb-entity-icon meeting">M</span><span><strong>{meeting.name}</strong><small>{meeting.project || meeting.client || "未关联"}</small></span><em>{meeting.due || "未设置日期"}</em></button><dl><div><dt>状态</dt><dd>{meeting.status || "未设置"}</dd></div><div><dt>项目</dt><dd>{meeting.project || "未关联"}</dd></div><div><dt>客户</dt><dd>{meeting.client || "未关联"}</dd></div><div><dt>行动项</dt><dd>{snapshot.tasks.filter((task) => task.path === meeting.path && !task.completed).length}</dd></div></dl><div class="qwb-summary-actions"><button on:click={() => (sharedMeetingPath = meeting.path)}>设为共享会议</button><button on:click={() => controller.openPath(meeting.path)}>打开会议</button><button on:click={() => controller.openYolo(meeting.path)}>YOLO</button></div></div>{:else}<p class="qwb-empty">请先选择会议。</p>{/each}
-              {:else if dataSource(item) === "suppliers"}
-                {#each selectedSupplier(item) ? [selectedSupplier(item)!] : [] as supplier}<div class="qwb-project-summary"><button class="qwb-summary-title" on:click={() => controller.openPath(supplier.path)}><span class="qwb-entity-icon supplier">S</span><span><strong>{supplier.name}</strong><small>{supplier.detail || supplier.related || "供应商"}</small></span><em>{supplier.status || "未设置"}</em></button><dl><div><dt>状态</dt><dd>{supplier.status || "未设置"}</dd></div><div><dt>关联</dt><dd>{supplier.related || "未关联"}</dd></div><div><dt>更新时间</dt><dd>{supplier.updatedAt ? new Date(supplier.updatedAt).toLocaleDateString("zh-CN") : "未知"}</dd></div></dl><div class="qwb-summary-actions"><button on:click={() => (sharedSupplierPath = supplier.path)}>设为共享供应商</button><button on:click={() => controller.openPath(supplier.path)}>打开供应商</button><button on:click={() => controller.openYolo(supplier.path)}>YOLO</button></div></div>{:else}<p class="qwb-empty">请先选择供应商。</p>{/each}
-              {:else}
-                {#each selectedProject(item) ? [selectedProject(item)!] : [] as project}<div class="qwb-project-summary"><button class="qwb-summary-title" on:click={() => controller.openPath(project.path)}><span class="qwb-entity-icon project">P</span><span><strong>{project.name}</strong><small>{projectClientLabel(project)}</small></span><em>{projectStatusLabel(project.status)}</em></button><dl><div><dt>客户</dt><dd>{projectClientLabel(project)}</dd></div><div><dt>类型</dt><dd>{project.projectType || "未设置"}</dd></div><div><dt>研制阶段</dt><dd>{project.phase || "未设置"}</dd></div><div><dt>任务</dt><dd>{projectHealth(project).completed}/{projectHealth(project).completed + projectHealth(project).open} 已完成</dd></div><div><dt>最近更新</dt><dd>{projectUpdatedLabel(project)}</dd></div></dl><div class="qwb-project-next"><small>明确下一步</small><p>{project.detail || "尚未填写明确下一步。"}</p></div><div class="qwb-summary-actions"><button disabled={sharedProjectPath === project.path} on:click={() => (sharedProjectPath = project.path)}>{sharedProjectPath === project.path ? "当前共享项目" : "设为共享项目"}</button><button on:click={() => controller.openPath(project.path)}>打开项目</button><button on:click={() => controller.openYolo(project.path)}>YOLO</button></div></div>{:else}<p class="qwb-empty">请选择或配置一个项目。</p>{/each}
-              {/if}
             {:else if item.widgetId === "projects.health" || (item.widgetId === "view.metrics" && metricKind(item) === "health")}
-              <div class="qwb-health-list">{#each scopedProjects(item) as project}<button on:click={() => controller.openPath(project.path)}><header><i class={projectHealth(project).level}></i><span><strong>{project.name}</strong><small>{projectClientLabel(project)}</small></span><em class={projectHealth(project).level}>{healthLabel(projectHealth(project).level)}</em></header><p>{projectHealth(project).reasons.join(" · ") || "没有发现风险信号"}</p><dl><div><dt>逾期</dt><dd>{projectHealth(project).overdue}</dd></div><div><dt>7 天内</dt><dd>{projectHealth(project).dueSoon}</dd></div><div><dt>待处理</dt><dd>{projectHealth(project).open}</dd></div><div><dt>未安排</dt><dd>{projectHealth(project).unscheduled}</dd></div></dl></button>{:else}<p class="qwb-empty">请选择或配置项目。</p>{/each}</div>
+              <div class="qwb-health-list">{#each scopedProjects(item) as project}<button on:click={() => controller.openPath(project.path)}><header><i class={projectHealth(project).level}></i><span><strong>{#if projectAnimalEmoji(controller.settings.projectAnimals[project.path])}<span class="qwb-project-animal">{projectAnimalEmoji(controller.settings.projectAnimals[project.path])}</span>{/if}{project.name}</strong><small>{projectClientLabel(project)}</small></span><em class={projectHealth(project).level}>{healthLabel(projectHealth(project).level)}</em></header><p>{projectHealth(project).reasons.join(" · ") || "没有发现风险信号"}</p><dl><div><dt>逾期</dt><dd>{projectHealth(project).overdue}</dd></div><div><dt>7 天内</dt><dd>{projectHealth(project).dueSoon}</dd></div><div><dt>待处理</dt><dd>{projectHealth(project).open}</dd></div><div><dt>未安排</dt><dd>{projectHealth(project).unscheduled}</dd></div></dl></button>{:else}<p class="qwb-empty">请选择或配置项目。</p>{/each}</div>
             {:else if item.widgetId === "projects.progress" || (item.widgetId === "view.metrics" && metricKind(item) === "progress")}
-              <div class="qwb-progress-list">{#each scopedProjects(item) as project}<button on:click={() => controller.openPath(project.path)}><header><span><strong>{project.name}</strong><small>{projectClientLabel(project)}</small></span><em>{projectHealth(project).progress}%</em></header><div class="qwb-progress-track"><i style={`width:${projectHealth(project).progress}%`}></i></div><dl><div><dt>已完成</dt><dd>{projectHealth(project).completed}</dd></div><div><dt>未完成</dt><dd>{projectHealth(project).open}</dd></div><div><dt>已逾期</dt><dd>{projectHealth(project).overdue}</dd></div><div><dt>未来 7 天</dt><dd>{projectHealth(project).dueSoon}</dd></div></dl></button>{:else}<p class="qwb-empty">暂无进度数据。</p>{/each}</div>
+              <div class="qwb-progress-list">{#each scopedProjects(item) as project}<button on:click={() => controller.openPath(project.path)}><header><span><strong>{#if projectAnimalEmoji(controller.settings.projectAnimals[project.path])}<span class="qwb-project-animal">{projectAnimalEmoji(controller.settings.projectAnimals[project.path])}</span>{/if}{project.name}</strong><small>{projectClientLabel(project)}</small></span><em>{projectHealth(project).progress}%</em></header><div class="qwb-progress-track"><i style={`width:${projectHealth(project).progress}%`}></i></div><dl><div><dt>已完成</dt><dd>{projectHealth(project).completed}</dd></div><div><dt>未完成</dt><dd>{projectHealth(project).open}</dd></div><div><dt>已逾期</dt><dd>{projectHealth(project).overdue}</dd></div><div><dt>未来 7 天</dt><dd>{projectHealth(project).dueSoon}</dd></div></dl></button>{:else}<p class="qwb-empty">暂无进度数据。</p>{/each}</div>
             {:else if item.widgetId === "projects.meetings" || (item.widgetId === "view.list" && dataSource(item) === "meetings")}
               {#if queryMode(item) === "client-meetings"}
                 {#each selectedClient(item) ? [selectedClient(item)!] : [] as client}<p class="qwb-widget-hint">{client.name}的相关会议</p><div class="qwb-entity-list compact">{#each meetingsForClient(client.path) as meeting}<button on:click={() => controller.openPath(meeting.path)}><span class="qwb-entity-icon meeting">M</span><span><strong>{meeting.name}</strong><small>{meeting.due || meeting.status || "会议记录"}</small></span><i>›</i></button>{:else}<p class="qwb-empty">暂无关联会议。</p>{/each}</div><button class="qwb-text-action" on:click={() => openCreate("meeting", client.path, "client")}>＋ 创建会议</button>{:else}<p class="qwb-empty">请先选择客户。</p>{/each}
@@ -2026,7 +2036,7 @@
             {:else if item.widgetId === "projects.actions" || (item.widgetId === "view.list" && queryMode(item) === "meeting-actions")}
               <div class="qwb-task-list">{#each scopedTasks(item).filter((task) => task.scope === "meeting-draft") as task (task.id)}<div class="qwb-task-row qwb-task-row-no-check"><button class="qwb-link" title={task.text} on:click={() => controller.openPath(task.path)}><span class="qwb-task-title-text">{task.text}</span></button><div class="qwb-task-meta"><span class="qwb-task-source" title={task.sourceName}><em>{task.sourceName}</em></span>{#if task.due}<time>{task.due}</time>{/if}</div><button class="qwb-row-action" disabled={!controller.settings.writesEnabled} on:click={() => openMigration(task)}>迁移</button></div>{:else}<p class="qwb-empty">没有待迁移的会议行动。</p>{/each}</div>{#if scopedTasks(item).some((task) => task.scope === "meeting-draft")}<button class="qwb-text-action" on:click={() => openMigration()}>批量迁移全部会议行动</button>{/if}
             {:else if item.widgetId === "projects.risks" || (item.widgetId === "view.list" && dataSource(item) === "projects" && queryMode(item) === "risks")}
-              <div class="qwb-risk-list">{#each scopedProjects(item).filter((project) => projectHealth(project).level !== "healthy") as project}<button on:click={() => controller.openPath(project.path)}><strong>{project.name}</strong><span>{#each projectHealth(project).reasons as reason}<small>{reason}</small>{:else}<small>项目信息不足，暂时无法判断。</small>{/each}</span><em class={projectHealth(project).level}>{healthLabel(projectHealth(project).level)}</em></button>{:else}<p class="qwb-empty">当前没有识别到项目风险。</p>{/each}</div>
+              <div class="qwb-risk-list">{#each scopedProjects(item).filter((project) => projectHealth(project).level !== "healthy") as project}<button on:click={() => controller.openPath(project.path)}><strong>{#if projectAnimalEmoji(controller.settings.projectAnimals[project.path])}<span class="qwb-project-animal">{projectAnimalEmoji(controller.settings.projectAnimals[project.path])}</span>{/if}{project.name}</strong><span>{#each projectHealth(project).reasons as reason}<small>{reason}</small>{:else}<small>项目信息不足，暂时无法判断。</small>{/each}</span><em class={projectHealth(project).level}>{healthLabel(projectHealth(project).level)}</em></button>{:else}<p class="qwb-empty">当前没有识别到项目风险。</p>{/each}</div>
             {:else if item.widgetId === "projects.activity" || (item.widgetId === "view.timeline" && queryMode(item) === "project-activity")}
               <div class="qwb-activity-list">{#each [...scopedProjects(item).map((project) => ({ ...project, activityType: "项目" })), ...snapshot.meetings.map((meeting) => ({ ...meeting, activityType: "会议" }))].sort((left, right) => (right.updatedAt ?? 0) - (left.updatedAt ?? 0)).slice(0, configLimit(item)) as entry}<button on:click={() => controller.openPath(entry.path)}><time>{entry.updatedAt ? new Date(entry.updatedAt).toLocaleDateString("zh-CN") : ""}</time><span><strong>{entry.name}</strong><small>{entry.activityType} · {entry.detail || entry.status || "最近修改"}</small></span></button>{:else}<p class="qwb-empty">暂无最近动态。</p>{/each}</div>
             {:else if item.widgetId === "projects.relations" || item.widgetId === "view.relations"}
@@ -2052,14 +2062,14 @@
             {:else if item.widgetId === "projects.milestones" || (item.widgetId === "view.list" && dataSource(item) === "projects" && queryMode(item) === "milestones")}
               <div class="qwb-entity-list compact">
                 {#each snapshot.projects.filter((project) => nextProjectTaskDate(project.path)).sort((left, right) => nextProjectTaskDate(left.path).localeCompare(nextProjectTaskDate(right.path))).slice(0, 10) as project}
-                  <button on:click={() => controller.openPath(project.path)}><span class="qwb-entity-icon project">◆</span><span><strong>{project.name}</strong><small>{project.phase || "阶段未设置"} · 下一任务 {nextProjectTaskDate(project.path)}</small></span><i>›</i></button>
+                  <button on:click={() => controller.openPath(project.path)}><span class="qwb-entity-icon project">{projectAnimalEmoji(controller.settings.projectAnimals[project.path]) || "◆"}</span><span><strong>{project.name}</strong><small>{project.phase || "阶段未设置"} · 下一任务 {nextProjectTaskDate(project.path)}</small></span><i>›</i></button>
                 {:else}<p class="qwb-empty">开放项目尚未设置里程碑或截止日期。</p>{/each}
               </div>
             {:else if item.widgetId.startsWith("projects.")}
               <div class="qwb-entity-list">
                 {#each snapshot.projects.slice(0, 12) as project}
                   <button on:click={() => controller.openPath(project.path)}>
-                    <span class="qwb-entity-icon project">P</span><span><strong>{project.name}</strong><small>{project.phase || project.status || "开放项目"}{project.detail ? ` · ${project.detail}` : ""}</small></span>
+                    <span class="qwb-entity-icon project">{projectAnimalEmoji(controller.settings.projectAnimals[project.path]) || "P"}</span><span><strong>{project.name}</strong><small>{project.phase || project.status || "开放项目"}{project.detail ? ` · ${project.detail}` : ""}</small></span>
                     <i>›</i>
                   </button>
                 {:else}
@@ -2133,9 +2143,7 @@
                 </div>
               {/if}
             {/if}
-          </div>
-        {/if}
-      </section>
+      </WidgetFrame>
     {/each}
     </div>
 
@@ -2180,18 +2188,11 @@
 {/if}
 
 {#if editingWidget}
-  <div class="qwb-modal-backdrop" role="presentation" on:click={(event) => event.currentTarget === event.target && (editingWidget = undefined)}>
-    <div class="qwb-modal qwb-widget-settings" role="dialog" aria-modal="true" aria-labelledby="qwb-widget-settings-title">
-      <header><div><span class="qwb-eyebrow">WIDGET INSTANCE</span><h2 id="qwb-widget-settings-title">{widgetTitle(editingWidget)}设置</h2></div><button aria-label="关闭" on:click={() => (editingWidget = undefined)}>×</button></header>
-      <div class="qwb-modal-body qwb-dialog-form">
-      <label>组件名称<input bind:value={editingTitle} placeholder="例如：客户 A 待跟进" /></label>
-      <fieldset class="qwb-widget-size-editor">
-        <legend>组件尺寸</legend>
-        <label>宽度<select bind:value={editingCols}><option value={1}>窄 · 1 列</option><option value={2}>标准 · 2 列</option><option value={3}>宽 · 3 列</option><option value={4}>整行 · 4 列</option></select></label>
-        <label>高度<select bind:value={editingRows}>{#each [1, 2, 3, 4, 5, 6, 7, 8] as row}<option value={row}>{row === 1 ? "紧凑" : row === 2 ? "标准" : `${row} 行`}</option>{/each}</select></label>
-        <small>布局按阅读顺序自动排列，不再需要拖到精确坐标。</small>
-      </fieldset>
-      {#if editingWidget.widgetId.startsWith("view.") || editingWidget.widgetId.startsWith("control.") || editingWidget.widgetId.startsWith("tasks.") || editingWidget.widgetId.startsWith("projects.")}
+  <WidgetSettingsPanel title={widgetTitle(editingWidget)} bind:name={editingTitle} bind:cols={editingCols} bind:rows={editingRows}
+    focusDialog={(node) => focusDialog(node, () => (editingWidget = undefined))}
+    onCancel={() => (editingWidget = undefined)} onSave={() => run(saveWidgetSettings, "组件设置已保存")}
+    onRemove={() => run(async () => { await removeWidget(editingWidget!); editingWidget = undefined; }, "组件已移除")}>
+      {#if widgetRegistry.get(editingWidget.widgetId)?.configurableSource}
         <label>数据源<select value={String(configSection(editingConfig, "source").kind ?? (editingWidget.widgetId.startsWith("projects.") ? "projects" : "tasks"))} on:change={(event) => updateEditingSource({ kind: (event.currentTarget as HTMLSelectElement).value })}><option value="tasks">任务</option><option value="projects">项目</option><option value="clients">客户</option><option value="suppliers">供应商</option><option value="meetings">会议</option><option value="knowledge">知识</option><option value="mixed">混合</option></select></label>
         <label>数据范围<select value={String(configSection(editingConfig, "source").scopeMode ?? editingConfig.scopeMode ?? "all")} on:change={(event) => updateEditingSource({ scopeMode: (event.currentTarget as HTMLSelectElement).value })}><option value="all">全部数据</option><option value="shared">跟随同类选择器</option><option value="context">跟随当前笔记</option><option value="fixed">固定实体</option></select></label>
         {#if (configSection(editingConfig, "source").scopeMode ?? editingConfig.scopeMode) === "fixed"}
@@ -2205,24 +2206,22 @@
             <SearchableSelect id="qwb-widget-fixed-project" label="固定项目" value={String(configSection(editingConfig, "source").projectPath ?? editingConfig.projectPath ?? "")} options={projectOptions()} emptyLabel="不固定项目" onSelect={(value) => updateEditingSource({ projectPath: value })} />
           {/if}
         {/if}
-        <SearchableSelect id="qwb-widget-client-filter" label="客户筛选" value={String(configSection(editingConfig, "source").clientPath ?? editingConfig.clientPath ?? "")} options={clientOptions()} emptyLabel="全部客户" onSelect={(value) => updateEditingSource({ clientPath: value })} />
-        <label>项目类型<select value={String(configSection(editingConfig, "source").projectType ?? editingConfig.projectType ?? "")} on:change={(event) => updateEditingSource({ projectType: (event.currentTarget as HTMLSelectElement).value })}><option value="">全部类型</option>{#each focusProjectTypes() as projectType}<option value={projectType}>{projectType}</option>{/each}</select></label>
+        {#if editingFields.has("client")}<SearchableSelect id="qwb-widget-client-filter" label="客户筛选" value={String(configSection(editingConfig, "source").clientPath ?? editingConfig.clientPath ?? "")} options={clientOptions()} emptyLabel="全部客户" onSelect={(value) => updateEditingSource({ clientPath: value })} />{/if}
+        {#if editingFields.has("projectType")}<label>项目类型<select value={String(configSection(editingConfig, "source").projectType ?? editingConfig.projectType ?? "")} on:change={(event) => updateEditingSource({ projectType: (event.currentTarget as HTMLSelectElement).value })}><option value="">全部类型</option>{#each focusProjectTypes() as projectType}<option value={projectType}>{projectType}</option>{/each}</select></label>{/if}
         {#if String(configSection(editingConfig, "source").kind ?? "tasks") === "clients"}
           <label>关系状态<select value={String(configSection(editingConfig, "query").relationshipStatus ?? "")} on:change={(event) => updateEditingQuery({ relationshipStatus: (event.currentTarget as HTMLSelectElement).value })}><option value="">全部关系状态</option>{#each clientRelationshipStatuses() as status}<option value={status}>{status}</option>{/each}</select></label>
           <label>机构类型<select value={String(configSection(editingConfig, "query").organizationType ?? "")} on:change={(event) => updateEditingQuery({ organizationType: (event.currentTarget as HTMLSelectElement).value })}><option value="">全部机构类型</option>{#each clientOrganizationTypes() as type}<option value={type}>{type}</option>{/each}</select></label>
         {/if}
-        <label>最多显示<input type="number" min="1" max="200" value={Number(configSection(editingConfig, "query").limit ?? editingConfig.limit ?? 30)} on:input={(event) => updateEditingQuery({ limit: Number((event.currentTarget as HTMLInputElement).value) || 30 })} /></label>
-        {#if String(configSection(editingConfig, "source").kind ?? "tasks") === "tasks" || editingWidget.widgetId.startsWith("tasks.")}
+        <label>最多显示<input id="qwb-widget-limit" aria-invalid={configIssues.some((issue) => issue.path.includes("limit"))} aria-describedby="qwb-widget-limit-error" type="number" min="1" max="200" value={Number(configSection(editingConfig, "query").limit ?? editingConfig.limit ?? 30)} on:input={(event) => updateEditingQuery({ limit: Number((event.currentTarget as HTMLInputElement).value) })} /></label>
+        {#if configIssues.some((issue) => issue.path.includes("limit"))}<p id="qwb-widget-limit-error" class="qwb-field-error" role="alert">显示数量须为 1 至 200 的整数。</p>{/if}
+        {#if editingFields.has("taskScopes")}
           <fieldset><legend>任务来源</legend>{#each [["project", "项目"], ["client", "客户"], ["meeting-draft", "会议草稿"]] as option}<label class="qwb-inline-check"><input type="checkbox" checked={editingTaskScopes().includes(option[0])} on:change={() => toggleEditingTaskScope(option[0] as TaskRecord["scope"])} />{option[1]}</label>{/each}</fieldset>
           <label class="qwb-inline-check"><input type="checkbox" checked={Boolean(configSection(editingConfig, "query").includeCompleted ?? editingConfig.includeCompleted)} on:change={(event) => updateEditingQuery({ includeCompleted: (event.currentTarget as HTMLInputElement).checked })} />包括已完成任务</label>
         {/if}
       {:else}
         <p class="qwb-empty">这个组件当前没有实例级筛选设置。</p>
       {/if}
-      <div class="qwb-modal-actions"><button class="qwb-button qwb-danger-button" on:click={() => run(async () => { await removeWidget(editingWidget!); editingWidget = undefined; }, "组件已移除")}>移除组件</button><span></span><button class="qwb-button qwb-button-subtle" on:click={() => (editingWidget = undefined)}>取消</button><button class="qwb-button qwb-button-primary" on:click={() => run(saveWidgetSettings, "组件设置已保存")}>保存</button></div>
-      </div>
-    </div>
-  </div>
+  </WidgetSettingsPanel>
 {/if}
 
 {#if dialog}

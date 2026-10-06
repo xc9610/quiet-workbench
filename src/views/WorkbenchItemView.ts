@@ -2,6 +2,7 @@ import { ItemView, WorkspaceLeaf } from "obsidian";
 import { mount, unmount } from "svelte";
 import WorkbenchView from "./WorkbenchView.svelte";
 import type { WorkbenchController } from "../ui/controller";
+import { companionIconName } from "../ui/companion-art";
 
 export const WORKBENCH_VIEW_TYPE = "quiet-workbench-view";
 
@@ -18,11 +19,12 @@ export class WorkbenchItemView extends ItemView {
   }
 
   getDisplayText(): string {
-    return "Asterism 工作台";
+    const { companionName, workspaceLabel } = this.controller.settings;
+    return companionName ? `${companionName} · ${workspaceLabel || "工作台"}` : "Asterism 工作台";
   }
 
   getIcon(): string {
-    return "asterism-mark";
+    return companionIconName(this.controller.settings.companionName);
   }
 
   usesController(controller: WorkbenchController): boolean {

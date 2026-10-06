@@ -9,6 +9,8 @@
   import { effectiveTaskDate } from "../domain/widget-data";
   import { resolveSidebarProfile, sidebarTaskSource, SIDEBAR_PROFILE_NAMES } from "../core/sidebar-context";
 
+  import { subscribeVisible } from "../ui/view-subscription";
+  let shellEl: HTMLElement;
   export let controller: WorkbenchController;
   let snapshot: WorkbenchSnapshot = controller.getSnapshot() ?? EMPTY_SNAPSHOT;
   let unsubscribe = () => {};
@@ -98,12 +100,13 @@
   }
 
   onMount(() => {
-    unsubscribe = controller.subscribe((next) => (snapshot = next));
+    const subscription = subscribeVisible(controller, shellEl, (next) => (snapshot = next));
+    unsubscribe = () => subscription.dispose();
   });
   onDestroy(() => unsubscribe());
 </script>
 
-<div class="qwb-context">
+<div bind:this={shellEl} class="qwb-context">
   <div class="qwb-context-profile"><span><i use:obsidianIcon={"panel-right"}></i>{SIDEBAR_PROFILE_NAMES[resolveSidebarProfile(snapshot.context)]}</span><small>自动上下文</small></div>
   {#each sidebarLayoutItems as item (layoutItemKey(item))}
     {#if item.widgetId === "core.context"}

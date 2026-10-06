@@ -8,6 +8,10 @@ export interface QuietWorkbenchSettings {
   writesEnabled: boolean;
   openWorkbenchOnStartup: boolean;
   appearanceMode: AppearanceMode;
+  companionName: string;
+  workspaceLabel: string;
+  heroBackgroundMode: "animal" | "classic";
+  projectAnimals: Record<string, string>;
   projectFolder: string;
   clientFolder: string;
   meetingFolder: string;
@@ -33,10 +37,24 @@ export interface QuietWorkbenchSettings {
   fullCalendarAccessToken: string;
 }
 
+export function defaultCompanionForVault(vaultName: string): { name: string; label: string; title: string; subtitle: string } | undefined {
+  if (vaultName === "Asterism") {
+    return { name: "卡皮", label: "工作库", title: "卡皮在这儿", subtitle: "先看清下一步，再把分散的信息带回项目。" };
+  }
+  if (vaultName === "Obsidian") {
+    return { name: "慢慢", label: "私人库", title: "慢慢来，看看今天", subtitle: "日记、健康和生活，按自己的节奏整理。" };
+  }
+  return undefined;
+}
+
 export const DEFAULT_SETTINGS: QuietWorkbenchSettings = {
   writesEnabled: false,
   openWorkbenchOnStartup: true,
   appearanceMode: "clear",
+  companionName: "",
+  workspaceLabel: "",
+  heroBackgroundMode: "animal",
+  projectAnimals: {},
   projectFolder: "10_业务_Business/02_项目_Projects",
   clientFolder: "10_业务_Business/01_客户_Clients",
   meetingFolder: "10_业务_Business/03_会议_Meetings",

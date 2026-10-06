@@ -16,6 +16,7 @@
   import { effectiveTaskDate } from "../domain/widget-data";
   import { formatDate } from "../services/template-service";
   import { EMPTY_SNAPSHOT, type EntitySummary, type WorkbenchController, type WorkbenchSnapshot } from "../ui/controller";
+  import { PROJECT_ANIMALS, projectAnimalEmoji } from "../ui/project-animals";
 
   export let controller: WorkbenchController;
 
@@ -106,6 +107,17 @@
     const next = candidates.find((project) => !reviewed.has(project.path)
       && (value === "全部" || normalizeProjectType(project.projectType) === value));
     selectedPath = next?.path ?? "";
+  }
+
+  async function chooseProjectAnimal(path: string, animalId: string): Promise<void> {
+    try {
+      await controller.setProjectAnimal(path, animalId);
+      message = animalId ? "项目动物已保存。" : "已清除项目动物。";
+      messageTone = "ok";
+    } catch (error) {
+      message = error instanceof Error ? error.message : "项目动物保存失败。";
+      messageTone = "error";
+    }
   }
 
   function selectProject(path: string): void {
@@ -352,7 +364,7 @@
       <div class="queue-list">
         {#each (query ? visibleProjects : queue) as project (project.path)}
           <button class:active={selected?.path === project.path} on:click={() => selectProject(project.path)}>
-            <span class="queue-icon" use:obsidianIcon={"folder-kanban"}></span>
+            <span class="queue-icon">{#if projectAnimalEmoji(controller.settings.projectAnimals[project.path])}{projectAnimalEmoji(controller.settings.projectAnimals[project.path])}{:else}<i use:obsidianIcon={"folder-kanban"}></i>{/if}</span>
             <span class="queue-copy">
               <strong>{project.name}</strong>
               <small>{project.client || project.projectType || "未关联客户"}<em>{projectTrigger(project)}</em></small>
@@ -370,10 +382,11 @@
           <div class="project-title-row">
             <div>
               <span class="project-kicker">{selected.projectType || "项目"} · {selected.client || "内部项目"}</span>
-              <h2>{selected.name}</h2>
+              <h2>{#if projectAnimalEmoji(controller.settings.projectAnimals[selected.path])}<span class="project-title-animal">{projectAnimalEmoji(controller.settings.projectAnimals[selected.path])}</span>{/if}{selected.name}</h2>
               <div class="project-badges"><span>{selected.status || "未设置状态"}</span><span>{selected.phase || "未设置研制阶段"}</span><span class={evidence.health.level}>{healthLabel()}</span></div>
             </div>
             <div class="project-actions">
+              <label class="project-animal-picker"><span>项目动物</span><select value={controller.settings.projectAnimals[selected.path] ?? ""} on:change={(event) => chooseProjectAnimal(selected!.path, event.currentTarget.value)}><option value="">不设置</option>{#each PROJECT_ANIMALS as animal}<option value={animal.id}>{animal.emoji} {animal.label}</option>{/each}</select></label>
               <button on:click={() => controller.openPath(selected!.path)}><i use:obsidianIcon={"file-text"}></i>打开项目</button>
               <button class="ai-action" disabled={busy} title="复制结构化审阅证据并在 YOLO 中开启持续对话" on:click={openYoloReview}><i use:obsidianIcon={"message-square-more"}></i>YOLO 审阅</button>
             </div>
@@ -563,6 +576,9 @@
   .project-badges span.attention { color: var(--color-orange); }
   .project-badges span.risk { color: var(--color-red); }
   .project-actions { display: flex; align-items: flex-start; gap: 6px; }
+  .project-title-animal { margin-right: 9px; font-size: .85em; }
+  .project-animal-picker { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 8px; border: 1px solid var(--review-line); border-radius: 9px; background: var(--background-primary); color: var(--text-muted); font-size: 12px; font-weight: 700; }
+  .project-animal-picker select { max-width: 100px; border: 0; background: transparent; color: var(--text-normal); font: inherit; cursor: pointer; }
   .project-actions button { display: inline-flex; align-items: center; gap: 6px; height: auto !important; min-height: 36px; padding: 0 11px; border: 1px solid var(--review-line); border-radius: 9px; background: var(--background-primary); font-size: 12px; font-weight: 700; cursor: pointer; }
   .project-actions .ai-action { border-color: color-mix(in srgb, var(--review-accent) 42%, var(--review-line)); color: var(--text-accent); }
   .spinning { animation: review-spin .9s linear infinite; }

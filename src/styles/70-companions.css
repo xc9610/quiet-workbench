@@ -1,0 +1,62 @@
+/* Vault companions sit behind the copy and controls, with a classic fallback. */
+.qwb-hero[data-companion="卡皮"] {
+  --qwb-art-coat: #bb8d6b;
+  --qwb-art-face: #d7aa83;
+  --qwb-art-outline: #694d41;
+  --qwb-art-detail: #9a735e;
+  --qwb-art-paper: #f2e8d7;
+  --qwb-art-blush: #cf8378;
+  --qwb-art-shadow: rgb(92 63 52 / 11%);
+  background:
+    linear-gradient(90deg, color-mix(in srgb, #e1c8a8 12%, var(--qwb-surface-0)) 0%, color-mix(in srgb, #d5aa85 11%, var(--qwb-surface-0)) 75%, color-mix(in srgb, #e4b989 16%, var(--qwb-surface-0)) 100%);
+}
+
+.qwb-hero[data-companion="慢慢"] {
+  --qwb-art-coat: #8b9c78;
+  --qwb-art-face: #e2d9bd;
+  --qwb-art-outline: #52614e;
+  --qwb-art-detail: #79926d;
+  --qwb-art-paper: #f1e8cf;
+  --qwb-art-mask: #b9b096;
+  --qwb-art-branch: #8f8067;
+  --qwb-art-leaf: #9bb68c;
+  --qwb-art-shadow: rgb(60 80 58 / 10%);
+  background:
+    linear-gradient(90deg, color-mix(in srgb, #c7d9b7 10%, var(--qwb-surface-0)) 0%, color-mix(in srgb, #a9c9b6 12%, var(--qwb-surface-0)) 75%, color-mix(in srgb, #c3d8a8 16%, var(--qwb-surface-0)) 100%);
+}
+
+.qwb-hero[data-companion="卡皮"]::before,
+.qwb-hero[data-companion="慢慢"]::before {
+  border-color: color-mix(in srgb, var(--interactive-accent) 9%, transparent);
+  opacity: .35;
+}
+
+.qwb-hero[data-companion="卡皮"]::after,
+.qwb-hero[data-companion="慢慢"]::after {
+  display: none;
+}
+
+.qwb-companion-art {
+  position: absolute;
+  z-index: 1;
+  right: clamp(0px, 3vw, 54px);
+  bottom: 0;
+  width: clamp(285px, 32vw, 450px);
+  height: min(94%, 305px);
+  overflow: visible;
+  opacity: .8;
+  pointer-events: none;
+}
+
+@media (max-width: 900px) {
+  .qwb-companion-art { right: -24px; width: 300px; opacity: .43; }
+}
+
+@media (max-width: 699px) {
+  .qwb-companion-art { right: -75px; bottom: 25px; width: 245px; height: 210px; opacity: .2; }
+  .qwb-hero[data-companion] .qwb-hero-copy { max-width: 100%; }
+}
+
+.qwb-project-animal { display: inline-block; margin-right: 6px; font-size: 1.05em; line-height: 1; }
+.qwb-project-animal-picker { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; border: 1px solid var(--background-modifier-border); border-radius: 8px; color: var(--text-muted); font-size: 12px; }
+.qwb-project-animal-picker select { max-width: 95px; border: 0; background: transparent; color: var(--text-normal); font: inherit; cursor: pointer; }

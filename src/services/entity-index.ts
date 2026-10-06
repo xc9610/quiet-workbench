@@ -85,6 +85,10 @@ export class EntityIndex {
     return update;
   }
 
+  includesPath(path: string): boolean {
+    return Boolean(this.definitionForPath(normalizeVaultPath(path)));
+  }
+
   removePath(path: string): boolean {
     return this.cache.delete(normalizeVaultPath(path));
   }

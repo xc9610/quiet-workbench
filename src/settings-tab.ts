@@ -124,6 +124,35 @@ export class QuietWorkbenchSettingTab extends PluginSettingTab {
           new Notice(value ? "Asterism 已设为启动主页" : "Asterism 启动主页已关闭");
         }));
 
+    new Setting(containerEl).setName("首页伙伴").setHeading();
+    new Setting(containerEl)
+      .setName("伙伴名字")
+      .setDesc("只改变当前库的工作台展示名称；插件标识和链接保持不变。")
+      .addText((text) => text.setValue(this.host.settings.companionName).onChange(async (value) => {
+        this.host.settings.companionName = value.trim();
+        await this.host.saveSettings();
+      }));
+    new Setting(containerEl)
+      .setName("库的称呼")
+      .setDesc("显示在首页名称旁，例如工作库或私人库。")
+      .addText((text) => text.setValue(this.host.settings.workspaceLabel).onChange(async (value) => {
+        this.host.settings.workspaceLabel = value.trim();
+        await this.host.saveSettings();
+      }));
+
+    new Setting(containerEl)
+      .setName("首页背景")
+      .setDesc("动物主题使用当前库的动物配色；慢慢显示插画。经典主题保留原有星形背景。")
+      .addDropdown((dropdown) => dropdown
+        .addOption("animal", "动物主题")
+        .addOption("classic", "经典主题")
+        .setValue(this.host.settings.heroBackgroundMode)
+        .onChange(async (value) => {
+          this.host.settings.heroBackgroundMode = value as "animal" | "classic";
+          await this.host.saveSettings();
+          await this.host.refreshWorkbench();
+        }));
+
     new Setting(containerEl).setName("首页摘要").setHeading();
     new Setting(containerEl)
       .setName("Hero 文案模式")

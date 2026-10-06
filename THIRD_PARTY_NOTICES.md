@@ -33,3 +33,18 @@ Asterism were informed by the open-source Apex Dashboard plugin:
 
 Asterism keeps its own Markdown index, task model, transaction system, Svelte
 rendering, layout persistence and write workflows.
+
+## Refresh and widget organization reference (2026-10-06)
+
+The refresh coordinator, visible-view state and Svelte widget components are
+independently implemented in Asterism. Their responsibility boundaries follow
+the existing implementation plan's behavioral references:
+
+- Hearth: dependency declarations and pending refresh tracking, evaluated commit
+  `6ccefa76cf23d674b9bd747aef1bde4f1f772d86`.
+- Home Pages: widget state, settings drafts and cleanup responsibilities, evaluated
+  commit `2f98a7c44432a5e077977535f94093487417c735`.
+
+No upstream source text was copied into these modules. Asterism retains its own
+Markdown services, transaction protection, configuration and Svelte rendering.
+Duowei's write queue and virtual window were not incorporated in this round.

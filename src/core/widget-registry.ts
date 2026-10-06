@@ -1,3 +1,4 @@
+import { widgetCapabilities, type WidgetDependency } from "./widget-capabilities";
 import type { WidgetDefinition, WorkbenchSurface } from "./types";
 
 export type WidgetConfigIssue = {
@@ -11,6 +12,8 @@ export type WidgetConfigValidator = (
 
 export interface RegisteredWidgetDefinition extends WidgetDefinition {
   description?: string;
+  dependencies?: readonly WidgetDependency[];
+  configurableSource?: boolean;
   showInLibrary?: boolean;
   libraryCategory?: "view" | "control" | "capture";
   validateConfig?: WidgetConfigValidator;
@@ -87,6 +90,7 @@ function freezeDefinition(
   definition: RegisteredWidgetDefinition
 ): RegisteredWidgetDefinition {
   return Object.freeze({
+    ...widgetCapabilities(definition.id),
     ...definition,
     surfaces: Object.freeze([...definition.surfaces]) as WorkbenchSurface[],
     defaultSize: Object.freeze({ ...definition.defaultSize })

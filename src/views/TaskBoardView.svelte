@@ -10,6 +10,8 @@
   import type { WorkbenchController, WorkbenchSnapshot } from "../ui/controller";
   import { EMPTY_SNAPSHOT } from "../ui/controller";
 
+  import { subscribeVisible } from "../ui/view-subscription";
+  let shellEl: HTMLElement;
   export let controller: WorkbenchController;
 
   type BoardMode = "timeline" | "status";
@@ -78,7 +80,8 @@
   }));
 
   onMount(() => {
-    unsubscribe = controller.subscribe((next) => (snapshot = next));
+    const subscription = subscribeVisible(controller, shellEl, (next) => (snapshot = next));
+    unsubscribe = () => subscription.dispose();
   });
   onDestroy(() => unsubscribe());
 
@@ -333,7 +336,7 @@
 
 <svelte:window on:keydown={handleBoardKeydown} />
 
-<div class="qwb-task-board">
+<div bind:this={shellEl} class="qwb-task-board">
   <header class="qwb-task-board-header">
     <div>
       <span class="qwb-task-board-eyebrow">ASTERISM · TASK BOARD · 0.8.12</span>
