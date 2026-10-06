@@ -22,7 +22,9 @@ export interface ParsedTask extends TaskRecord {
 
 export const TASK_PATTERN = /^(\s*)[-*+]\s+\[([ xX-])\]\s+(.*)$/;
 const DATE_PATTERN = /📅\s*(\d{4}-\d{2}-\d{2})/u;
-const SCHEDULED_PATTERN = /(?:⏳|🛫)\s*(\d{4}-\d{2}-\d{2})/u;
+const SCHEDULED_PATTERN = /⏳\s*(\d{4}-\d{2}-\d{2})/u;
+/** Tasks start date: the task cannot be worked on before this day. It is not a scheduled date. */
+const START_PATTERN = /🛫\s*(\d{4}-\d{2}-\d{2})/u;
 const BLOCK_ID_PATTERN = /(?:^|\s)\^([A-Za-z0-9-]+)\s*$/u;
 const PRIORITIES: Array<[string, NonNullable<TaskRecord["priority"]>]> = [
   ["⏫", "highest"],
@@ -78,29 +80,44 @@ export function parseFrontmatter(linesOrContent: string[] | string): ParsedFront
   let activeListKey: string | undefined;
   for (let index = 1; index < endLine; index += 1) {
     const line = lines[index] ?? "";
-    const listMatch = line.match(/^\s+-\s+(.*)$/);
+    const listMatch = line.match(/^\s*-(?:\s+(.*))?$/);
     if (listMatch && activeListKey) {
       const list = fields[activeListKey];
       if (Array.isArray(list)) list.push(parseScalar(listMatch[1] ?? ""));
       continue;
     }
 
+    if (line.trim() === "" && activeListKey) continue;
     const fieldMatch = line.match(/^([A-Za-z0-9_-]+):(?:\s*(.*))?$/);
     if (!fieldMatch) {
       activeListKey = undefined;
       continue;
     }
     const key = fieldMatch[1] ?? "";
-    const rawValue = fieldMatch[2] ?? "";
-    if (rawValue.trim() === "") {
-      const nextLine = lines[index + 1] ?? "";
-      const startsList = /^\s+-\s+/.test(nextLine);
+    const rawValue = (fieldMatch[2] ?? "").trim();
+    activeListKey = undefined;
+    if (rawValue === "") {
+      const nextLine = lines.slice(index + 1, endLine).find((candidate) => candidate.trim() !== "") ?? "";
+      const startsList = /^\s*-(?:\s|$)/.test(nextLine);
       fields[key] = startsList ? [] : "";
-      activeListKey = startsList ? key : undefined;
-    } else {
-      fields[key] = parseScalar(rawValue);
-      activeListKey = undefined;
+      if (startsList) activeListKey = key;
+      continue;
     }
+    const blockScalar = rawValue.match(/^([|>])([+-]?)\d*\s*(?:#.*)?$/u);
+    if (blockScalar) {
+      const block = collectIndentedLines(lines, index + 1, endLine);
+      fields[key] = foldBlockScalar(block.lines, blockScalar[1] === ">", blockScalar[2] ?? "");
+      index = block.next - 1;
+      continue;
+    }
+    const quote = rawValue[0];
+    if ((quote === '"' || quote === "'") && !closesQuotedScalar(rawValue, quote)) {
+      const block = collectIndentedLines(lines, index + 1, endLine);
+      fields[key] = parseScalar([rawValue, ...block.lines.map((entry) => entry.trim())].filter(Boolean).join(" "));
+      index = block.next - 1;
+      continue;
+    }
+    fields[key] = parseScalar(rawValue);
   }
   return {
     fields,
@@ -154,6 +171,7 @@ export function parseTasks(
       cancelled: marker === "-",
       due: taskBody.match(DATE_PATTERN)?.[1],
       scheduled: taskBody.match(SCHEDULED_PATTERN)?.[1],
+      start: taskBody.match(START_PATTERN)?.[1],
       priority,
       blockId,
       sourceName: options.sourceName,
@@ -171,6 +189,7 @@ export function cleanTaskText(taskBody: string): string {
   return taskBody
     .replace(DATE_PATTERN, "")
     .replace(SCHEDULED_PATTERN, "")
+    .replace(START_PATTERN, "")
     .replace(/✅\s*\d{4}-\d{2}-\d{2}/gu, "")
     .replace(/➕\s*\d{4}-\d{2}-\d{2}/gu, "")
     .replace(/(?:⏫|🔺|🔼|🔽|⏬|🔻)/gu, "")
@@ -238,6 +257,37 @@ function parseScalar(raw: string): unknown {
     return value.slice(1, -1);
   }
   return value;
+}
+
+/** Collects blank or indented lines that continue a multi-line value. */
+function collectIndentedLines(lines: string[], start: number, end: number): { lines: string[]; next: number } {
+  let next = start;
+  while (next < end && ((lines[next] ?? "").trim() === "" || /^\s/u.test(lines[next] ?? ""))) next += 1;
+  while (next > start && (lines[next - 1] ?? "").trim() === "") next -= 1;
+  return { lines: lines.slice(start, next), next };
+}
+
+function foldBlockScalar(block: string[], folded: boolean, chomping: string): string {
+  const indent = Math.min(...block.filter((line) => line.trim() !== "").map((line) => line.match(/^\s*/u)?.[0].length ?? 0));
+  const dedented = block.map((line) => line.slice(Number.isFinite(indent) ? indent : 0));
+  const text = folded
+    ? dedented.reduce((result, line, index) => {
+        if (index === 0) return line;
+        if (line.trim() === "") return `${result}\n`;
+        return result.endsWith("\n") || result === "" ? `${result}${line}` : `${result} ${line}`;
+      }, "")
+    : dedented.join("\n");
+  if (chomping === "-") return text.replace(/\n+$/u, "");
+  return text === "" ? "" : `${text.replace(/\n+$/u, "")}\n`;
+}
+
+function closesQuotedScalar(value: string, quote: string): boolean {
+  if (value.length < 2 || !value.endsWith(quote)) return false;
+  if (quote === '"') {
+    const trailingBackslashes = value.slice(0, -1).match(/\\*$/u)?.[0].length ?? 0;
+    return trailingBackslashes % 2 === 0;
+  }
+  return true;
 }
 
 function splitInlineList(value: string): string[] {

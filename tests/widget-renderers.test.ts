@@ -84,6 +84,7 @@ function context(patch: Partial<WidgetRenderContext> = {}): WidgetRenderContext 
     onAddTask: vi.fn(),
     onRetry: vi.fn(),
     memoDraft: "草稿",
+    memoResetKey: 0,
     onMemoInput: vi.fn(),
     onMemoKeydown: vi.fn(),
     onMemoSubmit: vi.fn(),

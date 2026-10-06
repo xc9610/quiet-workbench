@@ -8,6 +8,8 @@ export interface VaultFileInfo {
 export interface VaultPort {
   listMarkdownFiles(folder: string): Promise<VaultFileInfo[]>;
   read(path: string): Promise<string>;
+  /** Optional cached read for display-only paths. Writes and transactions always use `read`. */
+  readCached?(path: string): Promise<string>;
   write(path: string, content: string, expectedRevision?: string): Promise<void>;
   create(path: string, content: string): Promise<void>;
   trash(path: string): Promise<void>;

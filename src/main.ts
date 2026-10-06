@@ -7,6 +7,7 @@ import {
   TAbstractFile,
   TFile,
   TFolder,
+  View,
   normalizePath
 } from "obsidian";
 import type { ActivityDay, ContextSurface, EntityKind, EntityRecord, LayoutItem, LayoutSchema, TaskRecord, TransactionReceipt } from "./core/types";
@@ -36,6 +37,8 @@ import {
   normalizeVaultPath,
   type DetailedTransactionReceipt,
   type FullCalendarPluginAccess,
+  type LegacyTransactionJournalData,
+  type TransactionJournalData,
   type KnowledgePublicationInput,
   type KnowledgePublicationPreview,
   type MeetingMigrationBatchResult,
@@ -45,6 +48,7 @@ import {
 import { isTasksApiV1 } from "./services/tasks-api-adapter";
 import { DEFAULT_SETTINGS, defaultCompanionForVault, type QuietWorkbenchSettings } from "./settings";
 import { CAPYBARA_ICON_ID, CAPYBARA_ICON_SVG, SLOTH_ICON_ID, SLOTH_ICON_SVG, companionIconName } from "./ui/companion-art";
+import { setFrontmatterFields } from "./domain/frontmatter-writer";
 import { appendQuickMemoContent, normalizeQuickMemoEntry, recentQuickMemoEntries } from "./domain/memo";
 import { renderNoteMarkdown } from "./domain/note";
 import {
@@ -85,10 +89,15 @@ import {
   ProjectReviewItemView
 } from "./views/ProjectReviewItemView";
 
+type JournalData = TransactionJournalData | LegacyTransactionJournalData;
+
 interface PersistedPluginData extends Partial<QuietWorkbenchSettings> {
   settingsSchemaVersion?: number;
-  transactionJournal?: ReturnType<TransactionJournal["serialize"]>;
+  /** Before 0.8.18 the journal lived in data.json; it now has its own device-local file. */
+  transactionJournal?: JournalData;
 }
+
+const JOURNAL_FILE = "transaction-journal.json";
 
 const CURRENT_SETTINGS_SCHEMA_VERSION = 10;
 const LEGACY_MEMO_PATHS = new Set([
@@ -106,14 +115,14 @@ const ASTERISM_ICON_SVG = `
 `;
 
 class ObsidianDiagnosticReader implements DiagnosticVaultReader {
-  constructor(private readonly vault: VaultPort) {}
+  constructor(private readonly vault: VaultPort, private readonly app?: QuietWorkbenchPlugin["app"]) {}
 
   exists(path: string): Promise<boolean> {
     return this.vault.exists(path);
   }
 
   read(path: string): Promise<string> {
-    return this.vault.read(path);
+    return this.vault.readCached ? this.vault.readCached(path) : this.vault.read(path);
   }
 
   async listMarkdownFiles(folder: string): Promise<string[]> {
@@ -121,8 +130,9 @@ class ObsidianDiagnosticReader implements DiagnosticVaultReader {
   }
 
   pluginEnabled(id: string): boolean {
-    void id;
-    return false;
+    // app.plugins is not part of the public API; degrade to "not enabled" if it is unavailable.
+    const registry = (this.app as unknown as { plugins?: { enabledPlugins?: Set<string> } } | undefined)?.plugins;
+    return Boolean(registry?.enabledPlugins?.has(id));
   }
 }
 
@@ -168,7 +178,22 @@ export class PluginWorkbenchController implements WorkbenchController {
   }, () => this.publishRefresh());
   private refreshedDay = "";
 
-  refresh(): Promise<void> { return this.refreshCoordinator.request({ full: true }); }
+  private fullRefresh?: Promise<void>;
+  private scanned = false;
+
+  /** Full rescan. Concurrent callers (startup, views opening, buttons) share one run. */
+  refresh(): Promise<void> {
+    if (this.fullRefresh) return this.fullRefresh;
+    const run = this.refreshCoordinator.request({ full: true })
+      .then(() => { this.scanned = true; })
+      .finally(() => { if (this.fullRefresh === run) this.fullRefresh = undefined; });
+    this.fullRefresh = run;
+    return run;
+  }
+
+  refreshOnOpen(): Promise<void> {
+    return this.scanned && !this.fullRefresh ? this.refreshVisible() : this.refresh();
+  }
 
   refreshVisible(): Promise<void> {
     const day = formatDate(new Date(), "YYYY-MM-DD");
@@ -176,27 +201,33 @@ export class PluginWorkbenchController implements WorkbenchController {
     return this.refreshCoordinator.request({ calendar: true, activity: changed });
   }
 
-  schedulePaths(paths: string[], full = false): void {
+  /**
+   * @param structural create/delete/rename events. Diagnostics only check folders, templates and
+   * client field usage, so ordinary saves (Obsidian autosaves every few seconds while typing) skip them.
+   */
+  schedulePaths(paths: string[], full = false, structural = true): void {
     const entityPaths = paths.filter((path) => path.toLowerCase().endsWith(".md") && this.index.includesPath(path));
     this.refreshCoordinator.schedule({
       full,
       paths: entityPaths,
       memo: paths.includes(this.plugin.settings.memoPath),
       activity: true,
-      diagnostics: entityPaths.length > 0
+      diagnostics: structural && (entityPaths.length > 0 || paths.some((path) => this.isConfiguredTemplatePath(path)))
     }, (error) => console.error("Asterism automatic refresh failed", error));
   }
 
   private refreshPaths(paths: string[]): Promise<void> {
-    return this.refreshCoordinator.request({ paths, memo: paths.includes(this.plugin.settings.memoPath), activity: true, diagnostics: true });
+    return this.refreshCoordinator.request({ paths, memo: paths.includes(this.plugin.settings.memoPath), activity: true });
   }
 
-  constructor(private readonly plugin: QuietWorkbenchPlugin, journalData?: PersistedPluginData["transactionJournal"]) {
+  constructor(private readonly plugin: QuietWorkbenchPlugin, journalData?: JournalData) {
     this.vaultPort = new ObsidianVaultAdapter(plugin.app.vault, plugin.app.fileManager);
     this.journal = new TransactionJournal(plugin.settings.transactionLimit);
     if (journalData) {
       try {
         this.journal.hydrate(journalData);
+        // Old journals held full note copies; rewrite them in the compact format right away.
+        if (journalData.version === 1) void this.persistJournal().catch((error) => console.warn("Asterism: could not compact the transaction journal", error));
       } catch (error) {
         console.warn("Asterism: ignored invalid transaction journal", error);
       }
@@ -221,7 +252,7 @@ export class PluginWorkbenchController implements WorkbenchController {
     this.projectReviews = new ProjectReviewService(this.vaultPort, this.transactions);
     this.meetingMigrations = new MeetingMigrationService(this.vaultPort, this.transactions);
     this.knowledgePublications = new KnowledgePublicationPlanner(this.vaultPort);
-    this.diagnostics = new DiagnosticService(new ObsidianDiagnosticReader(this.vaultPort));
+    this.diagnostics = new DiagnosticService(new ObsidianDiagnosticReader(this.vaultPort, plugin.app));
     this.index = this.createIndex();
     this.indexSignature = this.makeIndexSignature();
   }
@@ -251,30 +282,41 @@ export class PluginWorkbenchController implements WorkbenchController {
     }
     const previous = this.staged ?? this.current;
     const calendarRange = scheduleReadRange();
-    const results = await Promise.allSettled([
+    const [indexResult, reportResult, memoResult, activityResult, calendarResult] = await Promise.allSettled([
       batch.full ? this.index.scan() : this.refreshIndexPaths(batch.paths),
-      batch.full || batch.diagnostics ? this.diagnostics.run(this.plugin.settings) : undefined,
-      batch.full || batch.memo ? this.readQuickMemo() : previous.memo,
-      batch.full || batch.activity ? this.readActivity() : previous.activity,
-      batch.full || batch.calendar ? this.fullCalendar.snapshot(calendarRange.start, calendarRange.end) : previous.calendar
+      batch.full || batch.diagnostics ? this.diagnostics.run(this.plugin.settings) : Promise.resolve(undefined),
+      batch.full || batch.memo ? this.readQuickMemo() : Promise.resolve(previous.memo),
+      batch.full || batch.activity ? this.readActivity() : Promise.resolve(previous.activity),
+      batch.full || batch.calendar ? this.fullCalendar.snapshot(calendarRange.start, calendarRange.end) : Promise.resolve(previous.calendar)
     ]);
-    const [update, report, memo, activity, calendar] = results.map((result) => {
-      if (result.status === "rejected") throw result.reason;
-      return result.value;
-    }) as [Awaited<ReturnType<EntityIndex["scan"]>> | { errors: { path: string; message: string }[] }, Awaited<ReturnType<DiagnosticService["run"]>> | undefined, WorkbenchSnapshot["memo"], ActivityDay[], WorkbenchSnapshot["calendar"]];
     if (this.disposed) return;
-    if (batch.full || batch.calendar) this.refreshedDay = formatDate(new Date(), "YYYY-MM-DD");
-    if (update.errors.length) throw new Error(update.errors.map((error) => `${error.path}: ${error.message}`).join("; "));
+    // Only a failure of the index scan itself is fatal. Unreadable single files and failing
+    // auxiliary sources degrade to diagnostics so the rest of the workbench keeps updating.
+    if (indexResult.status === "rejected") throw indexResult.reason;
+    const update: { errors: { path: string; message: string }[] } = indexResult.value;
+    const failures: DiagnosticItem[] = [];
+    const settled = <T>(result: PromiseSettledResult<T>, fallback: T, id: string, label: string): T => {
+      if (result.status === "fulfilled") return result.value;
+      failures.push({ id, label, detail: errorMessage(result.reason), status: "warning" });
+      return fallback;
+    };
+    const report = settled(reportResult, undefined, "refresh.diagnostics", "诊断未完成");
+    const memo = settled(memoResult, previous.memo, "refresh.memo", "速记读取失败");
+    const activity = settled(activityResult, previous.activity, "refresh.activity", "活动统计读取失败");
+    const calendar = settled(calendarResult, previous.calendar, "refresh.calendar", "日程读取失败");
+    if ((batch.full || batch.calendar) && calendarResult.status === "fulfilled") this.refreshedDay = formatDate(new Date(), "YYYY-MM-DD");
+    const transient = (id: string) => id === "memo.path" || id === "full-calendar.api" || id.startsWith("index.") || id.startsWith("refresh.");
     const diagnostics: DiagnosticItem[] = report ? report.items.map((item) => ({
       id: item.id,
       label: item.title,
       detail: item.path ? `${item.detail} · ${item.path}` : item.detail,
       status: item.status === "pass" ? "ok" : item.status === "warn" ? "warning" : "ok"
-    })) : previous.diagnostics.filter((item) => item.id !== "memo.path" && item.id !== "full-calendar.api");
+    })) : previous.diagnostics.filter((item) => !transient(item.id));
+    diagnostics.push(...failures);
     diagnostics.push(
       ...update.errors.map((error, index) => ({
         id: `index.${index}`,
-        label: "索引失败",
+        label: "索引失败（已跳过该文件，其余内容照常更新）",
         detail: `${error.path} · ${error.message}`,
         status: "error" as const
       }))
@@ -469,7 +511,9 @@ export class PluginWorkbenchController implements WorkbenchController {
 
   async scheduleTaskInCalendar(task: TaskRecord, date: string): Promise<void> {
     this.requireWrites();
-    await this.fullCalendar.scheduleTask(task, date);
+    // Full Calendar addresses tasks by line number; resolve it from the file, not the possibly stale index.
+    const current = await this.tasks.resolveCurrentTask(task);
+    await this.fullCalendar.scheduleTask({ ...task, line: current.line }, date);
     await this.refresh();
   }
 
@@ -681,7 +725,7 @@ export class PluginWorkbenchController implements WorkbenchController {
   }
 
   async persistJournal(): Promise<void> {
-    await this.plugin.saveSettings(this.journal.serialize());
+    await this.plugin.saveJournal(this.journal.serialize());
   }
 
   dispose(): void {
@@ -834,7 +878,7 @@ export class PluginWorkbenchController implements WorkbenchController {
     try {
       const path = normalizeVaultPath(configuredPath);
       if (!(await this.vaultPort.exists(path))) return { path, exists: false, recent: [] };
-      const content = await this.vaultPort.read(path);
+      const content = await this.vaultPort.readCached(path);
       return { path, exists: true, recent: recentQuickMemoEntries(content) };
     } catch (error) {
       return { path: configuredPath, exists: false, recent: [], error: `无法读取速记文件：${errorMessage(error)}` };
@@ -850,7 +894,8 @@ export default class QuietWorkbenchPlugin extends Plugin {
   settings: QuietWorkbenchSettings = structuredClone(DEFAULT_SETTINGS);
   private controller?: PluginWorkbenchController;
   private startupRefreshTimer?: number;
-  private journalData?: PersistedPluginData["transactionJournal"];
+  private journalData?: JournalData;
+  private journalWrite: Promise<void> = Promise.resolve();
   private lastPrimaryContext: { path?: string; surface: ContextSurface } = { surface: "note" };
 
   async onload(): Promise<void> {
@@ -909,7 +954,7 @@ export default class QuietWorkbenchPlugin extends Plugin {
       if (nextDay !== localDay) { localDay = nextDay; resumeRefresh(); }
     }, 60_000));
     this.registerEvent(this.app.vault.on("create", (file) => this.scheduleRefresh(file)));
-    this.registerEvent(this.app.vault.on("modify", (file) => this.scheduleRefresh(file)));
+    this.registerEvent(this.app.vault.on("modify", (file) => this.scheduleRefresh(file, undefined, false)));
     this.registerEvent(this.app.vault.on("delete", (file) => this.scheduleRefresh(file)));
     this.registerEvent(this.app.vault.on("rename", (file, oldPath) => this.scheduleRefresh(file, oldPath)));
     this.register(() => {
@@ -930,10 +975,8 @@ export default class QuietWorkbenchPlugin extends Plugin {
 
   onunload(): void {
     document.body.classList.remove("qwb-clear-mode", "qwb-journal-mode");
-    if (this.controller) {
-      this.controller.dispose();
-      void this.controller.persistJournal();
-    }
+    // The journal is persisted after every transaction, so nothing needs to be written while unloading.
+    this.controller?.dispose();
   }
 
   async activateWorkbench(): Promise<void> {
@@ -974,14 +1017,35 @@ export default class QuietWorkbenchPlugin extends Plugin {
     }
   }
 
-  async saveSettings(journal = this.journalData): Promise<void> {
-    this.journalData = journal;
+  async saveSettings(): Promise<void> {
     this.applyAppearanceMode();
     await this.saveData({
       ...this.settings,
-      settingsSchemaVersion: CURRENT_SETTINGS_SCHEMA_VERSION,
-      transactionJournal: journal
+      settingsSchemaVersion: CURRENT_SETTINGS_SCHEMA_VERSION
     });
+  }
+
+  /** Writes the undo journal to its own file so data.json stays small and contains no note text. */
+  saveJournal(journal: TransactionJournalData): Promise<void> {
+    this.journalData = journal;
+    const write = this.journalWrite.then(() => this.app.vault.adapter.write(this.journalPath(), JSON.stringify(journal)));
+    this.journalWrite = write.catch(() => undefined);
+    return write;
+  }
+
+  private journalPath(): string {
+    return normalizePath(`${this.manifest.dir ?? `${this.app.vault.configDir}/plugins/${this.manifest.id}`}/${JOURNAL_FILE}`);
+  }
+
+  private async loadJournalFile(): Promise<JournalData | undefined> {
+    try {
+      const path = this.journalPath();
+      if (!(await this.app.vault.adapter.exists(path))) return undefined;
+      return JSON.parse(await this.app.vault.adapter.read(path)) as JournalData;
+    } catch (error) {
+      console.warn("Asterism: ignored unreadable transaction journal", error);
+      return undefined;
+    }
   }
 
   private applyAppearanceMode(): void {
@@ -991,7 +1055,19 @@ export default class QuietWorkbenchPlugin extends Plugin {
 
   private async loadSettings(): Promise<void> {
     const data = (await this.loadData()) as PersistedPluginData | null;
-    this.journalData = data?.transactionJournal;
+    const legacyJournal = data?.transactionJournal;
+    this.journalData = (await this.loadJournalFile()) ?? legacyJournal;
+    let journalMigrated = !legacyJournal;
+    if (legacyJournal && this.journalData === legacyJournal) {
+      try {
+        await this.app.vault.adapter.write(this.journalPath(), JSON.stringify(legacyJournal));
+        journalMigrated = true;
+      } catch (error) {
+        console.warn("Asterism: kept the transaction journal in data.json because its file could not be written", error);
+      }
+    } else if (legacyJournal) {
+      journalMigrated = true;
+    }
     const positionedLayouts = ensureUnscheduledTaskList(ensureScheduleOverview(ensureActivityHeatmap(ensureContextSidebarLayouts(ensureSingleWorkbenchLayout(
       upgradePersistedLayouts(data?.layouts?.length ? data.layouts : getDefaultLayouts()),
       data?.activeWorkbenchLayout
@@ -1015,7 +1091,7 @@ export default class QuietWorkbenchPlugin extends Plugin {
         };
     this.settings = {
       ...structuredClone(DEFAULT_SETTINGS),
-      ...data,
+      ...knownSettings(data),
       appearanceMode: "clear",
       companionName: data?.companionName || companion?.name || "",
       workspaceLabel: data?.workspaceLabel || companion?.label || "",
@@ -1031,17 +1107,18 @@ export default class QuietWorkbenchPlugin extends Plugin {
       orderedGridVersion: ORDERED_GRID_VERSION,
       legacyPositionedLayouts
     };
-    if (data && (data.settingsSchemaVersion !== CURRENT_SETTINGS_SCHEMA_VERSION || needsOrderedGridMigration || seedCompanion)) {
+    const hasUnknownKeys = Boolean(data && Object.keys(data).some((key) => !(key in DEFAULT_SETTINGS) && key !== "settingsSchemaVersion" && key !== "transactionJournal"));
+    if (data && (data.settingsSchemaVersion !== CURRENT_SETTINGS_SCHEMA_VERSION || needsOrderedGridMigration || seedCompanion || (legacyJournal && journalMigrated) || hasUnknownKeys)) {
       await this.saveData({
         ...this.settings,
         settingsSchemaVersion: CURRENT_SETTINGS_SCHEMA_VERSION,
-        transactionJournal: this.journalData
+        ...(journalMigrated ? {} : { transactionJournal: legacyJournal })
       });
     }
   }
 
   private async syncActiveFile(): Promise<void> {
-    const viewType = this.app.workspace.activeLeaf?.view.getViewType();
+    const viewType = this.app.workspace.getActiveViewOfType(View)?.getViewType();
     if (viewType === CONTEXT_PANEL_VIEW_TYPE) {
       await this.requireController().setActivePath(this.lastPrimaryContext.path, this.lastPrimaryContext.surface);
       return;
@@ -1065,11 +1142,11 @@ export default class QuietWorkbenchPlugin extends Plugin {
     await this.requireController().setActivePath(this.lastPrimaryContext.path, this.lastPrimaryContext.surface);
   }
 
-  private scheduleRefresh(file: TAbstractFile, oldPath?: string): void {
+  private scheduleRefresh(file: TAbstractFile, oldPath?: string, structural = true): void {
     if (!(file instanceof TFile || file instanceof TFolder)) return;
     const paths = [file.path, ...(oldPath ? [oldPath] : [])];
     if (file instanceof TFile && !paths.some((path) => path.toLowerCase().endsWith(".md"))) return;
-    this.controller?.schedulePaths(paths, file instanceof TFolder);
+    this.controller?.schedulePaths(paths, file instanceof TFolder, structural);
   }
 
   private async rebindStaleViews(): Promise<void> {
@@ -1106,6 +1183,17 @@ export default class QuietWorkbenchPlugin extends Plugin {
     if (!this.controller) throw new Error("Asterism 尚未初始化。");
     return this.controller;
   }
+}
+
+/** Only known settings keys are taken from data.json; obsolete keys are dropped on the next save. */
+function knownSettings(data: PersistedPluginData | null): Partial<QuietWorkbenchSettings> {
+  if (!data) return {};
+  const source: Record<string, unknown> = { ...data };
+  const known: Record<string, unknown> = {};
+  for (const key of Object.keys(DEFAULT_SETTINGS)) {
+    if (Object.prototype.hasOwnProperty.call(source, key)) known[key] = source[key];
+  }
+  return known;
 }
 
 function entitySummary(entity: EntityRecord): EntitySummary {
@@ -1214,20 +1302,11 @@ function toWikiLink(path: string): string {
 }
 
 function setFrontmatterField(content: string, key: string, value: string, encode = true): string {
-  const normalized = content.replace(/\r\n/gu, "\n");
-  if (!normalized.startsWith("---\n")) throw new Error("目标模板或知识笔记缺少 YAML frontmatter。");
-  const end = normalized.indexOf("\n---", 4);
-  if (end < 0) throw new Error("YAML frontmatter 没有正确结束。");
-  const header = normalized.slice(4, end);
-  const encoded = encode ? JSON.stringify(value) : value;
-  const pattern = new RegExp(`^${escapeRegExp(key)}\\s*:.*$`, "mu");
-  const nextHeader = pattern.test(header) ? header.replace(pattern, `${key}: ${encoded}`) : `${header}\n${key}: ${encoded}`;
-  return `---\n${nextHeader}\n---${normalized.slice(end + 4)}`;
+  return setFrontmatterFields(content, { [key]: encode ? value : { raw: value } }, {
+    missing: { error: "目标模板或知识笔记缺少 YAML frontmatter。" }
+  });
 }
 
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
-}
 
 function sceneName(sceneId: string): string {
   return { workbench: "工作台", today: "今日执行", projects: "项目管理", knowledge: "知识整理" }[sceneId] ?? sceneId;

@@ -29,6 +29,10 @@ for (const file of requiredFiles) {
   if (!existsSync(path) || statSync(path).size === 0) errors.push(`Missing or empty release file: ${file}`);
 }
 
+if (existsSync(resolve(root, "main.js")) && !readFileSync(resolve(root, "main.js"), "utf8").includes(JSON.stringify(manifest.version))) {
+  errors.push(`main.js does not contain version ${manifest.version}; rebuild after bumping manifest.json`);
+}
+
 const expectedTag = process.env.RELEASE_TAG ?? process.env.GITHUB_REF_NAME;
 if (expectedTag && expectedTag !== manifest.version) {
   errors.push(`Release tag must equal manifest.version exactly (expected ${manifest.version}, got ${expectedTag})`);

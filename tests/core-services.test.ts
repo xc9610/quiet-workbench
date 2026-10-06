@@ -343,6 +343,64 @@ describe("WriteTransactionExecutor", () => {
     expect(restored.get("journal-1")).toBeUndefined();
   });
 
+  it("stores compact undo patches instead of full note copies and still undoes exactly", async () => {
+    const vault = new MemoryVault();
+    const longMemo = `# 速记\n\n${"历史条目，包含较长的中文内容。\n".repeat(400)}`;
+    vault.seed("memo.md", longMemo);
+    const journal = new TransactionJournal();
+    const executor = new WriteTransactionExecutor(vault, journal, { idFactory: () => "memo-1" });
+    const receipt = await executor.execute({
+      label: "Append quick memo",
+      operations: [{ kind: "write", path: "memo.md", content: `${longMemo}- 10:30 新的速记\n` }]
+    });
+    expect(receipt.status).toBe("committed");
+    const serialized = JSON.stringify(journal.serialize());
+    expect(serialized.length).toBeLessThan(1_000);
+    expect(serialized).not.toContain("历史条目");
+
+    const undo = await executor.undo("memo-1");
+    expect(undo.status).toBe("committed");
+    expect(await vault.read("memo.md")).toBe(longMemo);
+  });
+
+  it("converts a version 1 journal with full snapshots and can undo from it", async () => {
+    const vault = new MemoryVault();
+    vault.seed("a.md", "---\nstatus: new\n---\n正文");
+    const legacy = {
+      version: 1 as const,
+      entries: [{
+        receipt: {
+          id: "legacy-1", label: "legacy", status: "committed" as const, startedAt: "2026-10-01T00:00:00.000Z",
+          affectedPaths: ["a.md"], messages: [], operationCount: 1, restoredPaths: [], unresolvedPaths: []
+        },
+        snapshots: [{ kind: "write" as const, path: "a.md", before: "---\nstatus: old\n---\n正文", after: "---\nstatus: new\n---\n正文" }]
+      }]
+    };
+    const journal = new TransactionJournal();
+    journal.hydrate(legacy);
+    expect(journal.serialize().version).toBe(2);
+    expect(JSON.stringify(journal.serialize())).not.toContain("正文");
+    const executor = new WriteTransactionExecutor(vault, journal);
+    const undo = await executor.undo("legacy-1");
+    expect(undo.status).toBe("committed");
+    expect(await vault.read("a.md")).toBe("---\nstatus: old\n---\n正文");
+  });
+
+  it("keeps CRLF line endings when a service writes LF content", async () => {
+    const vault = new MemoryVault();
+    vault.seed("a.md", "## 待办\r\n- [ ] 一\r\n");
+    const executor = new WriteTransactionExecutor(vault);
+    const receipt = await executor.execute({
+      label: "append",
+      operations: [{ kind: "write", path: "a.md", content: "## 待办\n- [ ] 一\n- [ ] 二\n", expectedRevision: contentRevision("## 待办\r\n- [ ] 一\r\n") }]
+    });
+    expect(receipt.status).toBe("committed");
+    expect(await vault.read("a.md")).toBe("## 待办\r\n- [ ] 一\r\n- [ ] 二\r\n");
+    const undo = await executor.undo(receipt.id);
+    expect(undo.status).toBe("committed");
+    expect(await vault.read("a.md")).toBe("## 待办\r\n- [ ] 一\r\n");
+  });
+
   it("reports partial when compensation would overwrite an external edit", async () => {
     const vault = new MemoryVault();
     vault.seed("a.md", "A0");
@@ -366,6 +424,21 @@ describe("WriteTransactionExecutor", () => {
 });
 
 describe("project tasks and meeting migration", () => {
+  it("keeps Tasks start dates separate from scheduled dates", async () => {
+    const vault = new MemoryVault();
+    vault.seed("projects/a.md", "## 待办\n- [ ] 写方案 🛫 2026-10-01 📅 2026-10-20 ^start-1");
+    const tasks = new ProjectTaskService(vault, new WriteTransactionExecutor(vault));
+    const current = parseSingleTask(await vault.read("projects/a.md"), "projects/a.md", "project");
+    expect(current.start).toBe("2026-10-01");
+    expect(current.scheduled).toBeUndefined();
+    expect(current.text).toBe("写方案");
+    // The review dialog round-trips an empty scheduled date together with a new deadline.
+    await tasks.update(current, { due: "2026-10-25", scheduled: null });
+    const content = await vault.read("projects/a.md");
+    expect(content).toBe("## 待办\n- [ ] 写方案 🛫 2026-10-01 📅 2026-10-25 ^start-1");
+    expect(content).not.toContain("⏳");
+  });
+
   it("updates and clears scheduled dates without changing deadlines or block IDs", async () => {
     const vault = new MemoryVault();
     vault.seed("projects/a.md", "## 待办\n- [ ] 检查 ⏳ 2026-08-18 📅 2026-08-20 ^schedule-1");

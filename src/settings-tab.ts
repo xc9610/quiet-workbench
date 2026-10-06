@@ -68,11 +68,41 @@ class WriteConfirmationModal extends Modal {
 export class QuietWorkbenchSettingTab extends PluginSettingTab {
   private sidebarProfile: SidebarProfileId = "workbench";
 
+  private pendingEdits = new Map<string, () => void>();
+  private saveTimer?: number;
+
   constructor(app: App, private readonly host: QuietWorkbenchSettingsHost) {
     super(app, host as never);
   }
 
+  /**
+   * Text fields change on every keystroke. Applying and saving them only after typing pauses keeps
+   * data.json from being rewritten per character and avoids rebuilding the index for half-typed paths.
+   */
+  private queueTextEdit(key: string, apply: () => void): void {
+    this.pendingEdits.set(key, apply);
+    if (this.saveTimer !== undefined) window.clearTimeout(this.saveTimer);
+    this.saveTimer = window.setTimeout(() => void this.flushTextEdits(), 600);
+  }
+
+  private async flushTextEdits(): Promise<void> {
+    if (this.saveTimer !== undefined) window.clearTimeout(this.saveTimer);
+    this.saveTimer = undefined;
+    if (!this.pendingEdits.size) return;
+    const edits = [...this.pendingEdits.values()];
+    this.pendingEdits.clear();
+    for (const apply of edits) apply();
+    await this.host.saveSettings();
+  }
+
+  hide(): void {
+    void this.flushTextEdits();
+    super.hide();
+  }
+
   display(): void {
+    // Re-rendering reads values from settings, so apply edits that are still waiting first.
+    void this.flushTextEdits();
     const { containerEl } = this;
     containerEl.empty();
     containerEl.addClass("qwb-settings");
@@ -128,16 +158,14 @@ export class QuietWorkbenchSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("伙伴名字")
       .setDesc("只改变当前库的工作台展示名称；插件标识和链接保持不变。")
-      .addText((text) => text.setValue(this.host.settings.companionName).onChange(async (value) => {
-        this.host.settings.companionName = value.trim();
-        await this.host.saveSettings();
+      .addText((text) => text.setValue(this.host.settings.companionName).onChange((value) => {
+        this.queueTextEdit("companionName", () => { this.host.settings.companionName = value.trim(); });
       }));
     new Setting(containerEl)
       .setName("库的称呼")
       .setDesc("显示在首页名称旁，例如工作库或私人库。")
-      .addText((text) => text.setValue(this.host.settings.workspaceLabel).onChange(async (value) => {
-        this.host.settings.workspaceLabel = value.trim();
-        await this.host.saveSettings();
+      .addText((text) => text.setValue(this.host.settings.workspaceLabel).onChange((value) => {
+        this.queueTextEdit("workspaceLabel", () => { this.host.settings.workspaceLabel = value.trim(); });
       }));
 
     new Setting(containerEl)
@@ -213,9 +241,8 @@ export class QuietWorkbenchSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("知识模板（可选）")
       .setDesc("留空时使用插件内置安全模板；模板只读取，不会被插件修改，也不会执行 JavaScript。")
-      .addText((text) => text.setValue(this.host.settings.knowledgeTemplate).onChange(async (value) => {
-        this.host.settings.knowledgeTemplate = value.trim() ? normalizePath(value.trim()) : "";
-        await this.host.saveSettings();
+      .addText((text) => text.setValue(this.host.settings.knowledgeTemplate).onChange((value) => {
+        this.queueTextEdit("knowledgeTemplate", () => { this.host.settings.knowledgeTemplate = value.trim() ? normalizePath(value.trim()) : ""; });
       }));
 
     new Setting(containerEl).setName("客户字段兼容").setHeading();
@@ -267,11 +294,10 @@ export class QuietWorkbenchSettingTab extends PluginSettingTab {
       .setName("设备本地事务记录数")
       .setDesc("默认保存最近 50 次操作回执。布局撤销与业务撤销相互独立。")
       .addText((text) =>
-        text.setValue(String(this.host.settings.transactionLimit)).onChange(async (value) => {
+        text.setValue(String(this.host.settings.transactionLimit)).onChange((value) => {
           const parsed = Number.parseInt(value, 10);
           if (Number.isFinite(parsed)) {
-            this.host.settings.transactionLimit = Math.max(10, Math.min(200, parsed));
-            await this.host.saveSettings();
+            this.queueTextEdit("transactionLimit", () => { this.host.settings.transactionLimit = Math.max(10, Math.min(200, parsed)); });
           }
         })
       );
@@ -355,9 +381,8 @@ export class QuietWorkbenchSettingTab extends PluginSettingTab {
       .setName(label)
       .setDesc("相对于 Vault 根目录；保存时会规范化路径。")
       .addText((text) =>
-        text.setValue(this.host.settings[key]).onChange(async (value) => {
-          this.host.settings[key] = normalizePath(value.trim());
-          await this.host.saveSettings();
+        text.setValue(this.host.settings[key]).onChange((value) => {
+          this.queueTextEdit(`folder.${key}`, () => { this.host.settings[key] = normalizePath(value.trim()); });
         })
       );
   }
@@ -367,9 +392,8 @@ export class QuietWorkbenchSettingTab extends PluginSettingTab {
       .setName(label)
       .setDesc(description)
       .addText((text) =>
-        text.setValue(this.host.settings[key]).onChange(async (value) => {
-          this.host.settings[key] = normalizePath(value.trim());
-          await this.host.saveSettings();
+        text.setValue(this.host.settings[key]).onChange((value) => {
+          this.queueTextEdit(`folder.${key}`, () => { this.host.settings[key] = normalizePath(value.trim()); });
         })
       );
   }
@@ -379,9 +403,8 @@ export class QuietWorkbenchSettingTab extends PluginSettingTab {
       .setName(label)
       .setDesc("模板内可使用标题和日期占位符；不会执行任意 JavaScript。")
       .addText((text) =>
-        text.setValue(this.host.settings.templates[key]).onChange(async (value) => {
-          this.host.settings.templates[key] = normalizePath(value.trim());
-          await this.host.saveSettings();
+        text.setValue(this.host.settings.templates[key]).onChange((value) => {
+          this.queueTextEdit(`template.${key}`, () => { this.host.settings.templates[key] = normalizePath(value.trim()); });
         })
       );
   }

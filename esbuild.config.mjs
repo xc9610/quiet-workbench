@@ -1,7 +1,9 @@
 import esbuild from "esbuild";
 import sveltePlugin from "esbuild-svelte";
+import { readFileSync } from "node:fs";
 
 const production = process.argv[2] === "production";
+const manifest = JSON.parse(readFileSync(new URL("./manifest.json", import.meta.url), "utf8"));
 const scriptContext = await esbuild.context({
   entryPoints: ["src/main.ts"],
   bundle: true,
@@ -13,6 +15,7 @@ const scriptContext = await esbuild.context({
   treeShaking: true,
   minify: production,
   outfile: "main.js",
+  define: { __ASTERISM_VERSION__: JSON.stringify(manifest.version) },
   // Svelte's default production hash is filename-based. Obsidian keeps injected
   // styles across plugin reloads, so include CSS content to avoid stale rules.
   plugins: [sveltePlugin({ compilerOptions: {

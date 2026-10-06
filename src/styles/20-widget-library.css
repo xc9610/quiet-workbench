@@ -232,7 +232,6 @@
 .qwb-widget-search span,
 .qwb-board header span,
 .qwb-quadrants header span,
-.qwb-date-groups header span,
 .qwb-matrix-heading span {
   display: grid;
   min-width: 23px;

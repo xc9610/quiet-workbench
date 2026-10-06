@@ -65,14 +65,6 @@
   background: var(--background-secondary);
 }
 
-.qwb-hero-status svg {
-  width: 15px;
-  height: 15px;
-}
-
-.qwb-hero-status.enabled { color: var(--color-green); }
-.qwb-hero-status.error { color: var(--text-error); }
-
 .qwb-hero-topline-meta,
 .qwb-hero-inline-status {
   display: inline-flex;

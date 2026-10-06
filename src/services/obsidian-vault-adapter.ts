@@ -18,6 +18,10 @@ export class ObsidianVaultAdapter implements VaultPort {
     return this.vault.read(this.requireFile(path));
   }
 
+  async readCached(path: string): Promise<string> {
+    return this.vault.cachedRead(this.requireFile(path));
+  }
+
   async write(path: string, content: string, expectedRevision?: string): Promise<void> {
     const file = this.requireFile(path);
     await this.vault.process(file, (current) => {
@@ -63,7 +67,7 @@ export class ObsidianVaultAdapter implements VaultPort {
     let current = "";
     for (const segment of segments) {
       current = current ? `${current}/${segment}` : segment;
-      if (!(await this.vault.adapter.exists(current))) await this.vault.createFolder(current);
+      if (!this.vault.getAbstractFileByPath(current)) await this.vault.createFolder(current);
     }
   }
 }

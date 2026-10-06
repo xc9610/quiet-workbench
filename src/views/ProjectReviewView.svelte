@@ -17,6 +17,7 @@
   import { formatDate } from "../services/template-service";
   import { EMPTY_SNAPSHOT, type EntitySummary, type WorkbenchController, type WorkbenchSnapshot } from "../ui/controller";
   import { PROJECT_ANIMALS, projectAnimalEmoji } from "../ui/project-animals";
+  import { subscribeVisible } from "../ui/view-subscription";
 
   export let controller: WorkbenchController;
 
@@ -35,6 +36,7 @@
   interface NewTaskDraft { id: number; text: string; due: string }
   let snapshot: WorkbenchSnapshot = controller.getSnapshot() ?? EMPTY_SNAPSHOT;
   let unsubscribe = () => {};
+  let shellEl: HTMLElement;
   let selectedPath = "";
   let query = "";
   let projectTypeFilter: "全部" | ProjectType = "全部";
@@ -77,7 +79,11 @@
       && (!needle || `${project.name} ${project.client ?? ""} ${project.projectType ?? ""} ${project.status ?? ""} ${project.phase ?? ""}`.toLocaleLowerCase("zh-CN").includes(needle));
   });
   $: selectableProjects = query ? visibleProjects : queue;
-  $: selected = selectableProjects.find((project) => project.path === selectedPath) ?? selectableProjects[0];
+  // A project with an unsaved decision or new tasks stays selected even if search or filters hide it.
+  $: hasDraft = Boolean(decision || newTasks.some((task) => task.text.trim()));
+  $: selected = (selectedPath && (hasDraft || selectableProjects.some((project) => project.path === selectedPath))
+    ? snapshot.projects.find((project) => project.path === selectedPath)
+    : undefined) ?? selectableProjects[0];
   $: if (selected && selectedPath !== selected.path) selectProject(selected.path);
   $: evidence = selected
     ? buildProjectReviewEvidence(selected, snapshot.tasks, snapshot.meetings, today, Date.now(), snapshot.knowledge)
@@ -251,7 +257,7 @@
   }
 
   async function saveReview(): Promise<void> {
-    if (!selected || !decision || busy || taskBusyId || !canSave) return;
+    if (!selected || !evidence || !decision || busy || taskBusyId || !canSave) return;
     const savingProject = selected;
     busy = true;
     message = "";
@@ -269,12 +275,13 @@
           .filter((task) => task.text.trim())
           .map((task) => ({ text: task.text.trim(), due: task.due || undefined }))
       });
-      messageTone = "ok";
-      message = `已保存「${savingProject.name}」的审阅结论。`;
       reviewed = new Set([...reviewed, savingProject.path]);
       const next = queueOrder.find((path) => path !== savingProject.path && !reviewed.has(path));
       if (next) selectProject(next);
       else selectedPath = "";
+      // Set after moving on: selecting the next project clears the message area.
+      messageTone = "ok";
+      message = `已保存「${savingProject.name}」的审阅结论。`;
     } catch (error) {
       messageTone = "error";
       message = error instanceof Error ? error.message : String(error);
@@ -315,16 +322,18 @@
   }
 
   onMount(() => {
-    unsubscribe = controller.subscribe((next) => {
+    // Like the other pages, only recompute review evidence while this page is actually visible.
+    const subscription = subscribeVisible(controller, shellEl, (next) => {
       snapshot = next;
       const nextToday = formatDate(new Date(), "YYYY-MM-DD");
       queueOrder = reconcileProjectReviewQueue(queueOrder, projectReviewCandidates(next.projects, nextToday, next.tasks).map((project) => project.path), selectedPath);
     });
+    unsubscribe = () => subscription.dispose();
   });
   onDestroy(() => unsubscribe());
 </script>
 
-<div class="review-shell">
+<div class="review-shell" bind:this={shellEl}>
   <header class="review-header">
     <div class="review-heading">
       <span class="eyebrow">ASTERISM · PROJECT REVIEW</span>
@@ -748,6 +757,7 @@
     line-height: 1.12;
     -webkit-box-orient: vertical;
     -webkit-line-clamp: 2;
+    line-clamp: 2;
   }
   .project-actions { flex: 0 0 auto; flex-wrap: wrap; justify-content: flex-end; }
   .project-actions button { min-height: 36px; border-color: var(--review-line); background: var(--background-primary); }

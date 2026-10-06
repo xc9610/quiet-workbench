@@ -77,6 +77,8 @@ export interface WidgetRenderContext {
   onAddTask: () => void;
   onRetry: () => void;
   memoDraft: string;
+  /** Changes only when the parent clears the draft (e.g. after submitting). */
+  memoResetKey: number;
   onMemoInput: (value: string) => void;
   onMemoKeydown: (event: KeyboardEvent) => void;
   onMemoSubmit: () => void;
@@ -127,6 +129,7 @@ export function taskListProps(ctx: WidgetRenderContext) {
 export function memoProps(ctx: WidgetRenderContext) {
   return {
     draft: ctx.memoDraft,
+    resetKey: ctx.memoResetKey,
     writesEnabled: ctx.writesEnabled,
     busy: ctx.busy,
     path: ctx.snapshot.memo.path,

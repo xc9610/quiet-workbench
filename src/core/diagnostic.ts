@@ -31,7 +31,7 @@ const OPTIONAL_PLUGINS = [
   { id: "dataview", title: "Dataview" },
   { id: "obsidian-tasks-plugin", title: "Tasks" },
   { id: "templater-obsidian", title: "Templater" },
-  { id: "obsidian-full-calendar", title: "Full Calendar" }
+  { id: "full-calendar-remastered", title: "Full Calendar" }
 ] as const;
 
 export class DiagnosticService {

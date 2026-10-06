@@ -1,3 +1,4 @@
+import type { Component } from "svelte";
 import type { LayoutItem } from "../../core/types";
 import TaskListWidget from "./TaskListWidget.svelte";
 import MemoWidget from "./MemoWidget.svelte";
@@ -28,5 +29,10 @@ export function resolveWidgetRender(item: LayoutItem, ctx: WidgetRenderContext) 
     : kind === "memo" ? memoProps(ctx)
       : kind === "schedule" ? scheduleProps(ctx)
         : summaryProps(ctx);
-  return { kind, component: WIDGET_COMPONENTS[kind], props };
+  // kind, component and props always match; widen them so the host can spread props generically.
+  return {
+    kind,
+    component: WIDGET_COMPONENTS[kind] as unknown as Component<Record<string, unknown>>,
+    props: props as Record<string, unknown>
+  };
 }

@@ -118,8 +118,12 @@ export class EntityIndex {
   private async indexFile(file: VaultFileInfo): Promise<boolean> {
     const definition = this.definitionForPath(file.path);
     if (!definition || isExcludedEntityPath(file.path)) return false;
-    const content = await this.vault.read(file.path);
-    const parsed = parseMarkdown(content);
+    const content = await (this.vault.readCached ? this.vault.readCached(file.path) : this.vault.read(file.path));
+    const entityScope = taskScopeForEntity(definition.kind);
+    // One parse yields both frontmatter and tasks; the task source name is filled in below.
+    const parsed = parseMarkdown(content, entityScope
+      ? { path: file.path, sourceName: "", scope: entityScope, taskHeadings: taskHeadingsForEntity(definition.kind) }
+      : {});
     const fields = canonicalizeFields(parsed.frontmatter?.fields ?? {}, definition.aliases);
     const declared = scalarString(fields.type).toLowerCase();
     const matchesType = definition.typeValues.some((value) => value.toLowerCase() === declared);
@@ -136,14 +140,8 @@ export class EntityIndex {
       fields,
       mtime: file.mtime
     };
-    const entityScope = taskScopeForEntity(kind);
     const tasks = entityScope
-      ? parseMarkdown(content, {
-          path: file.path,
-          sourceName: entity.name,
-          scope: entityScope,
-          taskHeadings: taskHeadingsForEntity(kind)
-        }).tasks
+      ? parsed.tasks.map((task) => ({ ...task, sourceName: entity.name }))
       : [];
     this.cache.set(file.path, { mtime: file.mtime, entity, tasks });
     return true;

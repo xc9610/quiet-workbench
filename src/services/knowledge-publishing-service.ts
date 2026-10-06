@@ -1,3 +1,4 @@
+import { setFrontmatterFields } from "../domain/frontmatter-writer";
 import { contentRevision, normalizeNewlines, parseFrontmatter, stableHash } from "../domain/markdown";
 import type { TransactionPlan } from "../domain/transactions";
 import { TemplateService } from "./template-service";
@@ -171,7 +172,7 @@ function buildTargetContent(
     project: metadata.projectPath ? wikiLink(metadata.projectPath) : undefined,
     quiet_workbench_publication_id: metadata.id,
     created: localDate(metadata.now)
-  }, false);
+  }, { overwrite: false, missing: "create" });
 }
 
 function markPublishedSource(
@@ -183,40 +184,8 @@ function markPublishedSource(
     project: metadata.projectPath ? wikiLink(metadata.projectPath) : undefined,
     quiet_workbench_published_to: wikiLink(metadata.targetPath),
     quiet_workbench_publication_id: metadata.id,
-    quiet_workbench_published_at: metadata.now.toISOString()
-  });
-}
-
-function setFrontmatterFields(
-  content: string,
-  fields: Record<string, string | undefined>,
-  overwrite = true
-): string {
-  const normalized = normalizeNewlines(content);
-  const parsed = parseFrontmatter(normalized);
-  const activeFields = Object.entries(fields).filter((entry): entry is [string, string] => entry[1] !== undefined);
-  if (!parsed) {
-    const header = activeFields.map(([key, value]) => `${key}: ${encodeYamlScalar(value)}`).join("\n");
-    return `---\n${header}\n---\n${normalized.replace(/^\s*/u, "")}`;
-  }
-
-  const lines = normalized.split("\n");
-  const header = lines.slice(1, parsed.endLine);
-  for (const [key, value] of activeFields) {
-    const pattern = new RegExp(`^${escapeRegExp(key)}\\s*:`, "u");
-    const index = header.findIndex((line) => pattern.test(line));
-    if (index >= 0) {
-      if (overwrite) {
-        header[index] = `${key}: ${encodeYamlScalar(value)}`;
-        while (index + 1 < header.length && /^\s+/u.test(header[index + 1] ?? "")) {
-          header.splice(index + 1, 1);
-        }
-      }
-    } else {
-      header.push(`${key}: ${encodeYamlScalar(value)}`);
-    }
-  }
-  return ["---", ...header, "---", ...lines.slice(parsed.endLine + 1)].join("\n");
+    quiet_workbench_published_at: localIsoTimestamp(metadata.now)
+  }, { missing: "create" });
 }
 
 function markdownBody(content: string): string {
@@ -239,8 +208,12 @@ function wikiLink(path: string): string {
   return `[[${normalizeVaultPath(path).replace(/\.md$/iu, "")}]]`;
 }
 
-function encodeYamlScalar(value: string): string {
-  return JSON.stringify(value);
+/** Local wall-clock time with an explicit offset, e.g. 2026-10-06T08:30:00+08:00. */
+export function localIsoTimestamp(date: Date): string {
+  const pad = (value: number) => String(Math.trunc(Math.abs(value))).padStart(2, "0");
+  const offset = -date.getTimezoneOffset();
+  const sign = offset >= 0 ? "+" : "-";
+  return `${localDate(date)}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}${sign}${pad(offset / 60)}:${pad(offset % 60)}`;
 }
 
 function comparablePath(path: string): string {
@@ -258,9 +231,6 @@ function defaultPublicationId(sourcePath: string, targetPath: string, now: Date)
   return `qwb-knowledge-${stableHash(`${sourcePath}\n${targetPath}\n${now.toISOString()}`)}`;
 }
 
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
-}
 
 function replaceControlCharacters(value: string): string {
   return [...value].map((character) => {

@@ -111,6 +111,7 @@ export class MeetingMigrationService {
       text: sourceTask.text,
       due: sourceTask.due,
       scheduled: sourceTask.scheduled,
+      start: sourceTask.start,
       priority: sourceTask.priority,
       blockId: targetBlockId
     });

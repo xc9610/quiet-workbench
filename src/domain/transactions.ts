@@ -23,13 +23,33 @@ export interface DetailedTransactionReceipt extends TransactionReceipt {
   unresolvedPaths: string[];
 }
 
+/**
+ * Persisted undo information. The post-transaction content is not stored: undo reads it from the
+ * file and proves it is unchanged by length and hash. The pre-transaction content is stored as a
+ * patch against it, so appending a memo line costs a few bytes instead of two copies of the note.
+ */
+export interface StoredSnapshot {
+  path: string;
+  kind: TransactionOperation["kind"];
+  afterLength: number;
+  afterHash: string;
+  /** For writes: replacing `after.slice(start, end)` with `text` yields the previous content. */
+  patch?: { start: number; end: number; text: string };
+}
+
 export interface StoredTransaction {
   receipt: DetailedTransactionReceipt;
-  snapshots: TransactionSnapshot[];
+  snapshots: StoredSnapshot[];
+}
+
+/** Version 1 journals stored full before/after copies; they are converted on load. */
+export interface LegacyTransactionJournalData {
+  version: 1;
+  entries: Array<{ receipt: DetailedTransactionReceipt; snapshots: TransactionSnapshot[] }>;
 }
 
 export interface TransactionJournalData {
-  version: 1;
+  version: 2;
   entries: StoredTransaction[];
 }
 

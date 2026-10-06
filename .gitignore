@@ -6,3 +6,4 @@ coverage/
 .obsidian/
 test-vault/.obsidian/workspace*.json
 test-vault/.obsidian/cache
+design-qa.md

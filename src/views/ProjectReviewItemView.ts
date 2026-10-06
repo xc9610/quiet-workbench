@@ -35,7 +35,7 @@ export class ProjectReviewItemView extends ItemView {
       target: this.contentEl,
       props: { controller: this.controller }
     });
-    await this.controller.refresh();
+    await (this.controller.refreshOnOpen?.() ?? this.controller.refresh());
   }
 
   async onClose(): Promise<void> {

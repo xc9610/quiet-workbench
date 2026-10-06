@@ -32,6 +32,8 @@ export interface TaskRecord {
   cancelled?: boolean;
   due?: string;
   scheduled?: string;
+  /** Tasks start date (🛫). Kept separate from the scheduled date (⏳). */
+  start?: string;
   priority?: "highest" | "high" | "normal" | "low" | "lowest";
   blockId?: string;
   sourceName: string;

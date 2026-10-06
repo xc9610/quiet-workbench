@@ -69,6 +69,8 @@
     }
     if (event.key === "Escape") {
       event.preventDefault();
+      // An open list consumes Esc; only a closed field lets Esc reach the surrounding dialog.
+      if (expanded) event.stopPropagation();
       query = selected?.label ?? "";
       expanded = false;
     }

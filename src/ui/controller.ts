@@ -120,6 +120,8 @@ export interface WorkbenchController {
   subscribe(listener: (snapshot: WorkbenchSnapshot) => void): () => void;
   refresh(): Promise<void>;
   refreshVisible?(): Promise<void>;
+  /** Used when a view opens: a full scan only if none has completed yet, otherwise a light refresh. */
+  refreshOnOpen?(): Promise<void>;
   openWorkbench(): Promise<void>;
   openTaskBoard(): Promise<void>;
   openProjectReview(): Promise<void>;

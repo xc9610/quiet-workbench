@@ -17,6 +17,7 @@ export interface AddProjectTaskInput {
   text: string;
   due?: string;
   scheduled?: string;
+  start?: string;
   priority?: NonNullable<TaskRecord["priority"]>;
   heading?: string;
   blockId?: string;
@@ -154,6 +155,11 @@ export class ProjectTaskService {
     });
   }
 
+  /** Re-reads the note and returns the task at its current line, refusing if it changed since indexing. */
+  async resolveCurrentTask(task: TaskRecord): Promise<ParsedTask> {
+    return this.readCurrentTask(task);
+  }
+
   private async readCurrentTask(task: TaskRecord): Promise<ParsedTask> {
     return (await this.readCurrentTaskContext(task)).current;
   }
@@ -177,9 +183,11 @@ export class ProjectTaskService {
 export function renderTaskLine(input: AddProjectTaskInput & { text: string; blockId?: string }): string {
   validateOptionalDate(input.due, "due");
   validateOptionalDate(input.scheduled, "scheduled");
+  validateOptionalDate(input.start, "start");
   const parts = [`- [ ] ${sanitizeTaskText(input.text)}`];
   const emoji = priorityEmoji(input.priority ?? "normal");
   if (emoji) parts.push(emoji);
+  if (input.start) parts.push(`🛫 ${input.start}`);
   if (input.scheduled) parts.push(`⏳ ${input.scheduled}`);
   if (input.due) parts.push(`📅 ${input.due}`);
   if (input.blockId) parts.push(`^${validateBlockId(input.blockId)}`);

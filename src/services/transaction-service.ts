@@ -1,9 +1,11 @@
 import type { TransactionStatus } from "../core/types";
-import { contentRevision } from "../domain/markdown";
+import { contentRevision, stableHash } from "../domain/markdown";
 import {
   RevisionConflictError,
   TransactionPreflightError,
   type DetailedTransactionReceipt,
+  type LegacyTransactionJournalData,
+  type StoredSnapshot,
   type StoredTransaction,
   type TransactionJournalData,
   type TransactionPlan,
@@ -24,8 +26,8 @@ export class TransactionJournal {
 
   constructor(private readonly limit = 50, private readonly byteLimit = 2_000_000) {}
 
-  add(entry: StoredTransaction): void {
-    this.entries.unshift(entry);
+  add(receipt: DetailedTransactionReceipt, snapshots: TransactionSnapshot[] = []): void {
+    this.entries.unshift({ receipt: structuredClone(receipt), snapshots: snapshots.map(compactSnapshot) });
     this.trim();
   }
 
@@ -50,12 +52,21 @@ export class TransactionJournal {
   }
 
   serialize(): TransactionJournalData {
-    return { version: 1, entries: structuredClone(this.entries) };
+    return { version: 2, entries: structuredClone(this.entries) };
   }
 
-  hydrate(data: TransactionJournalData): void {
-    if (data.version !== 1 || !Array.isArray(data.entries)) throw new Error("Unsupported transaction journal data.");
-    this.entries = structuredClone(data.entries);
+  hydrate(data: TransactionJournalData | LegacyTransactionJournalData): void {
+    if (!data || !Array.isArray(data.entries)) throw new Error("Unsupported transaction journal data.");
+    if (data.version === 1) {
+      this.entries = data.entries.map((entry) => ({
+        receipt: structuredClone(entry.receipt),
+        snapshots: (entry.snapshots ?? []).map(compactSnapshot)
+      }));
+    } else if (data.version === 2) {
+      this.entries = structuredClone(data.entries);
+    } else {
+      throw new Error("Unsupported transaction journal data.");
+    }
     this.trim();
   }
 
@@ -63,8 +74,8 @@ export class TransactionJournal {
     this.entries = this.entries.slice(0, Math.max(0, this.limit));
     let bytes = 0;
     this.entries = this.entries.map((entry) => {
-      const receiptBytes = JSON.stringify(entry.receipt).length * 2;
-      const snapshotBytes = JSON.stringify(entry.snapshots).length * 2;
+      const receiptBytes = utf8Length(JSON.stringify(entry.receipt));
+      const snapshotBytes = utf8Length(JSON.stringify(entry.snapshots));
       bytes += receiptBytes;
       if (bytes + snapshotBytes <= this.byteLimit) {
         bytes += snapshotBytes;
@@ -102,7 +113,7 @@ export class WriteTransactionExecutor {
     } catch (error) {
       receipt.messages.push(errorMessage(error));
       this.finish(receipt, "failed");
-      this.journal.add({ receipt, snapshots: [] });
+      this.journal.add(receipt);
       return receipt;
     }
 
@@ -125,7 +136,7 @@ export class WriteTransactionExecutor {
         this.finish(receipt, receipt.unresolvedPaths.length > 0 ? "partial" : "rolled-back");
       }
     }
-    this.journal.add({ receipt, snapshots });
+    this.journal.add(receipt, receipt.status === "committed" ? snapshots : []);
     return structuredClone(receipt);
   }
 
@@ -142,33 +153,35 @@ export class WriteTransactionExecutor {
       this.now()
     );
     this.emit("preflight", receipt);
+    const fail = (message: string): DetailedTransactionReceipt => {
+      receipt.messages.push(message);
+      this.finish(receipt, "failed");
+      this.journal.add(receipt);
+      return structuredClone(receipt);
+    };
+    // Rebuild full snapshots from the files, which must still hold exactly the transaction's output.
+    const snapshots: TransactionSnapshot[] = [];
     for (const snapshot of stored.snapshots) {
       if (this.options.isPathProtected?.(normalizeVaultPath(snapshot.path))) {
-        receipt.messages.push(`Cannot undo because the protected file is read-only: ${snapshot.path}`);
-        this.finish(receipt, "failed");
-        this.journal.add({ receipt, snapshots: [] });
-        return structuredClone(receipt);
+        return fail(`Cannot undo because the protected file is read-only: ${snapshot.path}`);
       }
       if (!(await this.vault.exists(snapshot.path))) {
-        receipt.messages.push(`Cannot undo because ${snapshot.path} no longer exists.`);
-        this.finish(receipt, "failed");
-        this.journal.add({ receipt, snapshots: [] });
-        return structuredClone(receipt);
+        return fail(`Cannot undo because ${snapshot.path} no longer exists.`);
       }
       const current = await this.vault.read(snapshot.path);
-      if (contentRevision(current) !== contentRevision(snapshot.after)) {
-        receipt.messages.push(`Cannot undo because ${snapshot.path} changed after the transaction.`);
-        this.finish(receipt, "failed");
-        this.journal.add({ receipt, snapshots: [] });
-        return structuredClone(receipt);
+      if (!matchesStoredAfter(current, snapshot)) {
+        return fail(`Cannot undo because ${snapshot.path} changed after the transaction.`);
       }
+      snapshots.push(snapshot.kind === "create"
+        ? { kind: "create", path: snapshot.path, after: current }
+        : { kind: "write", path: snapshot.path, after: current, before: applyPatch(current, snapshot.patch) });
     }
 
     this.emit("committing", receipt);
     const restored: TransactionSnapshot[] = [];
     try {
-      const writes = stored.snapshots.filter((snapshot) => snapshot.kind === "write").reverse();
-      const creates = stored.snapshots.filter((snapshot) => snapshot.kind === "create").reverse();
+      const writes = snapshots.filter((snapshot) => snapshot.kind === "write").reverse();
+      const creates = snapshots.filter((snapshot) => snapshot.kind === "create").reverse();
       for (const snapshot of writes) {
         this.assertMutablePath(snapshot.path);
         await this.vault.write(snapshot.path, snapshot.before ?? "", contentRevision(snapshot.after));
@@ -205,7 +218,7 @@ export class WriteTransactionExecutor {
       }
       this.finish(receipt, receipt.unresolvedPaths.length > 0 ? "partial" : "rolled-back");
     }
-    this.journal.add({ receipt, snapshots: [] });
+    this.journal.add(receipt);
     return structuredClone(receipt);
   }
 
@@ -229,7 +242,7 @@ export class WriteTransactionExecutor {
         if (operation.expectedRevision && operation.expectedRevision !== actual) {
           throw new RevisionConflictError(path, operation.expectedRevision, actual);
         }
-        snapshots.push({ kind: "write", path, before, after: operation.content });
+        snapshots.push({ kind: "write", path, before, after: preserveLineEndings(before, operation.content) });
       }
     }
     return snapshots;
@@ -273,6 +286,59 @@ export class WriteTransactionExecutor {
 
 export function makeTransactionId(): string {
   return `qwb-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/** Converts a full snapshot into its persisted form (see {@link StoredSnapshot}). */
+export function compactSnapshot(snapshot: TransactionSnapshot): StoredSnapshot {
+  const after = snapshot.after;
+  const compact: StoredSnapshot = {
+    path: snapshot.path,
+    kind: snapshot.kind,
+    afterLength: after.length,
+    afterHash: stableHash(after)
+  };
+  if (snapshot.kind === "write") compact.patch = diffPatch(after, snapshot.before ?? "");
+  return compact;
+}
+
+/** Smallest single-range edit turning `from` into `to`. */
+export function diffPatch(from: string, to: string): { start: number; end: number; text: string } {
+  const limit = Math.min(from.length, to.length);
+  let prefix = 0;
+  while (prefix < limit && from.charCodeAt(prefix) === to.charCodeAt(prefix)) prefix += 1;
+  let suffix = 0;
+  while (
+    suffix < limit - prefix
+    && from.charCodeAt(from.length - 1 - suffix) === to.charCodeAt(to.length - 1 - suffix)
+  ) suffix += 1;
+  return { start: prefix, end: from.length - suffix, text: to.slice(prefix, to.length - suffix) };
+}
+
+export function applyPatch(content: string, patch?: { start: number; end: number; text: string }): string {
+  if (!patch) return content;
+  return `${content.slice(0, patch.start)}${patch.text}${content.slice(patch.end)}`;
+}
+
+function matchesStoredAfter(current: string, snapshot: StoredSnapshot): boolean {
+  return current.length === snapshot.afterLength && stableHash(current) === snapshot.afterHash;
+}
+
+/** Services build content with LF; files that use CRLF keep CRLF so diffs and sync stay clean. */
+function preserveLineEndings(before: string, after: string): string {
+  if (!before.includes("\r\n") || after.includes("\r")) return after;
+  return after.replace(/\n/gu, "\r\n");
+}
+
+function utf8Length(value: string): number {
+  let bytes = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code < 0x80) bytes += 1;
+    else if (code < 0x800) bytes += 2;
+    else if (code >= 0xd800 && code <= 0xdbff) { bytes += 4; index += 1; }
+    else bytes += 3;
+  }
+  return bytes;
 }
 
 function makeReceipt(id: string, label: string, paths: string[], now: Date): DetailedTransactionReceipt {

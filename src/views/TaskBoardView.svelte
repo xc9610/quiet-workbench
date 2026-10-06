@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
+  import { ASTERISM_VERSION } from "../core/version";
   import { Platform, setIcon } from "obsidian";
   import type { TaskRecord, TaskScope } from "../core/types";
   import {
@@ -260,7 +261,17 @@
   }
 
   function handleBoardKeydown(event: KeyboardEvent): void {
-    if (event.key === "Escape" && editReason) cancelEdit();
+    if (event.key !== "Escape" || !editReason) return;
+    // Ignore Esc pressed in another pane or window.
+    const target = event.target;
+    const inBoard = target instanceof Node && shellEl?.contains(target);
+    const onActivePage = target === shellEl?.ownerDocument.body && Boolean(shellEl?.closest(".workspace-leaf.mod-active"));
+    if (inBoard || onActivePage) cancelEdit();
+  }
+
+  /** Moves focus into the confirmation dialog so keyboard users land on it. */
+  function focusOnMount(node: HTMLElement) {
+    node.focus();
   }
 
   function canDrag(task: TaskRecord): boolean {
@@ -339,7 +350,7 @@
 <div bind:this={shellEl} class="qwb-task-board">
   <header class="qwb-task-board-header">
     <div>
-      <span class="qwb-task-board-eyebrow">ASTERISM · TASK BOARD · 0.8.12</span>
+      <span class="qwb-task-board-eyebrow">ASTERISM · TASK BOARD · {ASTERISM_VERSION}</span>
       <h1>任务看板</h1>
       <p>统一查看项目任务、客户行动和待迁移会议草稿。</p>
     </div>
@@ -437,7 +448,7 @@
 
   {#if editingTask && editReason}
     <div class="qwb-task-board-drop-backdrop" role="presentation" on:click={(event) => event.currentTarget === event.target && cancelEdit()}>
-      <div class="qwb-task-board-drop-dialog" role="dialog" aria-modal="true" aria-labelledby="qwb-task-board-drop-title" tabindex="-1">
+      <div class="qwb-task-board-drop-dialog" use:focusOnMount role="dialog" aria-modal="true" aria-labelledby="qwb-task-board-drop-title" tabindex="-1">
         <header>
           <div><small>移动任务</small><h2 id="qwb-task-board-drop-title">确认新的任务位置</h2></div>
           <button type="button" aria-label="关闭" on:click={cancelEdit}>×</button>

@@ -49,7 +49,6 @@
 
 .qwb-board > section,
 .qwb-quadrants > section,
-.qwb-date-groups > section,
 .qwb-matrix > section {
   padding: 8px;
   border: 1px solid var(--qwb-border);
@@ -69,7 +68,6 @@
 
 .qwb-board header,
 .qwb-quadrants header,
-.qwb-date-groups header,
 .qwb-matrix-heading {
   display: flex;
   align-items: center;
@@ -103,13 +101,11 @@
 }
 
 .qwb-board header strong,
-.qwb-quadrants header strong,
-.qwb-date-groups header strong {
+.qwb-quadrants header strong {
   font-size: 10px;
 }
 
 .qwb-quadrants section > button,
-.qwb-date-groups section > button,
 .qwb-matrix section > button:not(.qwb-matrix-heading) {
   display: grid;
   width: 100%;
@@ -182,7 +178,6 @@
 .qwb-board-card-main small,
 .qwb-board-card-main time,
 .qwb-quadrants small,
-.qwb-date-groups small,
 .qwb-matrix time {
   color: var(--text-faint);
   font-size: 8.5px;
@@ -211,7 +206,6 @@
 .qwb-quadrant-urgent { border-top-color: var(--color-orange) !important; }
 .qwb-quadrant-later { border-top-color: var(--text-faint) !important; }
 
-.qwb-date-groups,
 .qwb-matrix,
 .qwb-health-list,
 .qwb-progress-list,
@@ -223,89 +217,6 @@
 .qwb-relations {
   display: grid;
   gap: 7px;
-}
-
-.qwb-date-groups {
-  display: flex;
-  height: 100%;
-  min-width: 0;
-  min-height: 0;
-  padding-bottom: 4px;
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
-  scrollbar-width: thin;
-}
-
-.qwb-date-groups > section {
-  display: flex;
-  min-width: 220px;
-  min-height: 0;
-  flex: 1 0 220px;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.qwb-date-groups > section > header {
-  flex: 0 0 auto;
-}
-
-.qwb-date-column-body {
-  min-height: 0;
-  padding-right: 2px;
-  flex: 1;
-  overflow-y: auto;
-  overscroll-behavior-y: contain;
-  scrollbar-width: thin;
-}
-
-.qwb-date-column-body > button {
-  display: grid !important;
-  width: 100% !important;
-  height: auto !important;
-  min-width: 0 !important;
-  min-height: 56px !important;
-  margin: 0 0 7px !important;
-  padding: 9px 10px !important;
-  align-content: start !important;
-  justify-content: stretch !important;
-  gap: 5px !important;
-  min-width: 0;
-  overflow: hidden;
-  border: 1px solid var(--qwb-border) !important;
-  border-radius: 8px !important;
-  background: var(--background-primary) !important;
-  box-shadow: none !important;
-  color: var(--text-normal) !important;
-  font-size: 10px !important;
-  line-height: 1.4 !important;
-  text-align: left !important;
-  white-space: normal !important;
-}
-
-.qwb-date-column-body > button:hover {
-  background: var(--background-modifier-hover) !important;
-}
-
-.qwb-date-column-body > button span,
-.qwb-date-column-body > button small {
-  display: block;
-  min-width: 0;
-  max-width: 100%;
-  overflow: hidden;
-}
-
-.qwb-date-column-body > button span {
-  display: -webkit-box;
-  line-height: 1.4;
-  overflow-wrap: anywhere;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-}
-
-.qwb-date-column-body > button small {
-  line-height: 1.35;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .qwb-month-calendar {

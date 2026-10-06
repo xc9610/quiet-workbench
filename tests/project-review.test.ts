@@ -243,6 +243,41 @@ describe("ProjectReviewService", () => {
     expect(after).toContain("| 2026-08-20 | 完成初审 |");
   });
 
+  it("replaces multi-line review notes and list-valued fields without corrupting YAML", async () => {
+    const vault = new MemoryVault();
+    const original = [
+      "---",
+      "type: 项目",
+      "status: 推进中",
+      "review_note: |",
+      "  第一行重要结论",
+      "  第二行附加条件",
+      "phase:",
+      "- 方案",
+      "- 初样",
+      "tags:",
+      "  - 热控",
+      "---",
+      "# 项目"
+    ].join("\n");
+    vault.seed("projects/热控设计.md", original);
+    const service = new ProjectReviewService(vault, new WriteTransactionExecutor(vault));
+
+    const receipt = await service.save({
+      projectPath: "projects/热控设计.md",
+      decision: "已通过",
+      nextAction: "进入初样",
+      note: "第一行重要结论；第二行附加条件"
+    }, new Date(2026, 9, 6, 12));
+
+    const after = await vault.read("projects/热控设计.md");
+    expect(receipt.status).toBe("committed");
+    expect(after).toContain('review_note: "第一行重要结论；第二行附加条件"');
+    expect(after).not.toContain("  第二行附加条件");
+    expect(after).not.toMatch(/^- (方案|初样)$/mu);
+    expect(after).toContain("tags:\n  - 热控");
+  });
+
   it("rejects conditional approval without a review date before writing", async () => {
     const vault = new MemoryVault();
     const original = "---\ntype: 项目\n---\n# 项目";

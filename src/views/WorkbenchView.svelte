@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onDestroy, onMount, tick } from "svelte";
+  import { ASTERISM_VERSION } from "../core/version";
   import WidgetFrame from "../ui/widgets/WidgetFrame.svelte";
   import WidgetSettingsPanel from "../ui/widgets/WidgetSettingsPanel.svelte";
   import { resolveWidgetRender } from "../ui/widgets/widget-renderers";
@@ -106,7 +107,7 @@
   export let controller: WorkbenchController;
 
   type DialogKind = "note" | "entity" | "task" | "task-edit" | "schedule" | "migrate" | "knowledge" | "yolo-preview" | null;
-  const UI_VERSION = "0.8.16";
+  const UI_VERSION = ASTERISM_VERSION;
   const DEFAULT_NOTE_FOLDER = controller.settings.solutionAssetsFolder || DEFAULT_PROJECT_NOTE_FOLDER;
 
   interface EntityDraft {
@@ -173,6 +174,7 @@
   let draftClients: string[] = [];
   let clientCursor = 0;
   let memoDraft = "";
+  let memoResetKey = 0;
   let memoInput: HTMLTextAreaElement;
   let layoutEditMode = false;
   let layoutDirty = false;
@@ -283,9 +285,23 @@
     closeFocusFilters();
   }
 
+  /** Esc belongs to this workbench only when focus is inside it, or on the page while its tab is active. */
+  function escapeTargetsWorkbench(event: KeyboardEvent): boolean {
+    const target = event.target;
+    if (shellEl && target instanceof Node && shellEl.contains(target)) return true;
+    const ownerBody = shellEl?.ownerDocument.body;
+    return target === ownerBody && Boolean(shellEl?.closest(".workspace-leaf.mod-active"));
+  }
+
   function handleDocumentKeydown(event: KeyboardEvent): void {
     if (dialog) return;
     if (event.key !== "Escape") return;
+    if (showWidgetLibrary) {
+      // The library has its own Esc handling; never let Esc fall through and discard the layout draft.
+      showWidgetLibrary = false;
+      return;
+    }
+    if (!escapeTargetsWorkbench(event)) return;
     if (showClientPicker) showClientPicker = false;
     else if (focusFilterInstances.length) closeFocusFilters();
     else if (layoutEditMode) cancelLayoutEditing();
@@ -494,6 +510,7 @@
     const succeeded = await run(() => controller.appendQuickMemo(value), "速记已追加");
     if (succeeded) {
       memoDraft = "";
+      memoResetKey += 1;
       await tick();
       memoInput?.focus();
     }
@@ -798,11 +815,17 @@
     return snapshot.suppliers.find((supplier) => supplier.path === path) ?? scopedSuppliers(item)[0];
   }
 
-  $: projectForTask =(task: TaskRecord) => {
-    if (task.scope === "project") return snapshot.projects.find((project) => project.path === task.path);
-    if (task.scope === "meeting-draft") return resolveProject(snapshot.meetings.find((meeting) => meeting.path === task.path)?.project);
-    return undefined;
-  }
+  // Lookup tables rebuilt once per snapshot instead of scanning every list for every task row.
+  $: projectByPath = new Map(snapshot.projects.map((project) => [project.path, project]));
+  $: meetingByPath = new Map(snapshot.meetings.map((meeting) => [meeting.path, meeting]));
+  $: projectForTask = ((cache: Map<string, WorkbenchSnapshot["projects"][number] | undefined>) => (task: TaskRecord) => {
+    if (cache.has(task.id)) return cache.get(task.id);
+    const project = task.scope === "project"
+      ? projectByPath.get(task.path)
+      : task.scope === "meeting-draft" ? resolveProject(meetingByPath.get(task.path)?.project) : undefined;
+    cache.set(task.id, project);
+    return project;
+  })(new Map());
 
   $: scopedProjects =(item: LayoutItem) => {
     const clientMode = queryMode(item) === "client-projects";
@@ -1661,6 +1684,11 @@
     memoDraft = value;
   }
 
+  /** Read through a function so typing a memo does not make every widget's render context stale. */
+  function currentMemoDraft(): string {
+    return memoDraft;
+  }
+
   function attachMemoTextarea(node: HTMLTextAreaElement): void {
     memoInput = node;
   }
@@ -1706,7 +1734,8 @@
     onEditTask: openTaskEdit,
     onAddTask: () => openTask(scopedProjectPath(item)),
     onRetry: () => run(() => controller.refresh(), "刷新完成"),
-    memoDraft,
+    memoDraft: currentMemoDraft(),
+    memoResetKey,
     onMemoInput: setMemoDraftValue,
     onMemoKeydown: handleMemoKeydown,
     onMemoSubmit: submitQuickMemo,
@@ -1733,8 +1762,10 @@
 
   onMount(() => {
     hydrateFocusFilters();
-    document.addEventListener("pointerdown", handleDocumentPointerDown);
-    document.addEventListener("keydown", handleDocumentKeydown);
+    // Use the document that hosts this view so pop-out windows get their own listeners.
+    const hostDocument = shellEl?.ownerDocument ?? document;
+    hostDocument.addEventListener("pointerdown", handleDocumentPointerDown);
+    hostDocument.addEventListener("keydown", handleDocumentKeydown);
     if (isDesktop && gridEl) {
       gridResizeObserver = new ResizeObserver(updateGridMetrics);
       gridResizeObserver.observe(gridEl);
@@ -1743,8 +1774,8 @@
     viewSubscription = subscribeVisible(controller, shellEl, (next) => (snapshot = next), () => layoutEditMode);
     unsubscribe = () => viewSubscription?.dispose();
     return () => {
-      document.removeEventListener("pointerdown", handleDocumentPointerDown);
-      document.removeEventListener("keydown", handleDocumentKeydown);
+      hostDocument.removeEventListener("pointerdown", handleDocumentPointerDown);
+      hostDocument.removeEventListener("keydown", handleDocumentKeydown);
       gridResizeObserver?.disconnect();
     };
   });
@@ -1772,7 +1803,7 @@
         <button use:obsidianIcon={companionIconName(controller.settings.companionName)} class="qwb-hero-action is-current" aria-label="当前页面：工作台" title="工作台" aria-current="page" on:click={() => controller.openWorkbench()}></button>
         <button use:obsidianIcon={"list-todo"} class="qwb-hero-action" aria-label="打开任务看板" title="任务看板" on:click={() => controller.openTaskBoard()}></button>
         <button use:obsidianIcon={"clipboard-check"} class="qwb-hero-action" aria-label="打开项目审阅" title="项目审阅" on:click={() => controller.openProjectReview()}></button>
-        <button use:obsidianIcon={"calendar-days"} class="qwb-hero-action" aria-label="打开完整日程" title="完整日程" on:click={() => run(() => controller.openCalendar())}></button>
+        <button use:obsidianIcon={"calendar-days"} class="qwb-hero-action" aria-label="打开完整日程" title="完整日程" on:click={() => run(() => controller.openCalendar(), "已打开完整日程")}></button>
         <button use:obsidianIcon={"panel-right-open"} class="qwb-hero-action" aria-label="打开上下文侧栏" title="上下文侧栏" on:click={() => controller.openContextPanel()}></button>
         <span class="qwb-page-nav-divider" aria-hidden="true"></span>
         <button use:obsidianIcon={"refresh-cw"} class="qwb-hero-action" aria-label="刷新工作台" title="刷新" disabled={busy} on:click={() => run(() => controller.refresh(), "已刷新")}></button>
@@ -2160,7 +2191,7 @@
 
 {#if showWidgetLibrary}
   <div class="qwb-modal-backdrop" role="presentation" on:click={(event) => event.currentTarget === event.target && (showWidgetLibrary = false)}>
-    <div class="qwb-modal qwb-widget-library" role="dialog" aria-modal="true" aria-labelledby="qwb-widget-library-title">
+    <div class="qwb-modal qwb-widget-library" use:focusDialog={() => (showWidgetLibrary = false)} role="dialog" aria-modal="true" aria-labelledby="qwb-widget-library-title">
       <header><div><span class="qwb-eyebrow">COMPONENT LIBRARY</span><h2 id="qwb-widget-library-title">{selectedWidgetType ? `配置${BUILTIN_WIDGETS.find((widget) => widget.id === selectedWidgetType)?.title ?? "组件"}` : "选择组件类型"}</h2></div><button aria-label="关闭" on:click={() => (showWidgetLibrary = false)}>×</button></header>
       <div class="qwb-modal-body">
       {#if !selectedWidgetType}
@@ -2279,7 +2310,7 @@
         <p class="qwb-schedule-task">{selectedTask?.text}</p>
         <label>计划日期<input type="date" bind:value={taskScheduled} /></label>
         <p class="qwb-field-help">计划日期用于安排何时处理，不改变截止日期。</p>
-        <div class="qwb-modal-actions"><button class="qwb-button qwb-button-subtle" on:click={() => (dialog = null)}>取消</button><button class="qwb-button" on:click={() => run(() => controller.openCalendar())}>打开完整日程</button><button class="qwb-button qwb-button-primary" disabled={!controller.settings.writesEnabled || !taskScheduled || busy} on:click={submitTaskSchedule}>保存计划日期</button></div>
+        <div class="qwb-modal-actions"><button class="qwb-button qwb-button-subtle" on:click={() => (dialog = null)}>取消</button><button class="qwb-button" on:click={() => run(() => controller.openCalendar(), "已打开完整日程")}>打开完整日程</button><button class="qwb-button qwb-button-primary" disabled={!controller.settings.writesEnabled || !taskScheduled || busy} on:click={submitTaskSchedule}>保存计划日期</button></div>
       {:else if dialog === "migrate"}
         <p>预览：将 {migrationTasks.length} 条会议草稿迁移到同一目标项目或客户。每条行动都有独立回执；成功项写入稳定来源标记，重复执行不会重复创建。</p>
         <div class="qwb-inline-preview">{#each migrationTasks.slice(0, 8) as task}<div>• {task.text} <small>{task.sourceName}</small></div>{/each}</div>

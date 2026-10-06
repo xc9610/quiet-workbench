@@ -1,4 +1,5 @@
-import { appendToSection, contentRevision, normalizeNewlines, parseFrontmatter, stableHash } from "../domain/markdown";
+import { setFrontmatterFields } from "../domain/frontmatter-writer";
+import { appendToSection, contentRevision, normalizeNewlines, stableHash } from "../domain/markdown";
 import { projectStatusForDecision, projectTypeForDecision, validateProjectReviewInput, type ProjectReviewInput } from "../domain/project-review";
 import type { DetailedTransactionReceipt } from "../domain/transactions";
 import { renderTaskLine } from "./task-service";
@@ -25,7 +26,7 @@ export class ProjectReviewService {
       review_due: input.reviewDue?.trim() || undefined,
       review_note: input.note?.trim() || undefined,
       updated: date
-    });
+    }, { undefinedFields: "delete", missing: { error: "项目笔记缺少 YAML frontmatter，未执行写入。" } });
     const typeTrace = input.decision === "赢单转交付" ? `；项目类型由「${input.currentProjectType}」转为「合同交付」` : "";
     const trace = `- ${date}：项目审阅结论为「${input.decision}」；状态更新为「${status}」${typeTrace}${input.phase?.trim() ? `；研制阶段「${input.phase.trim()}」` : ""}${input.nextAction?.trim() ? `；下一步：${input.nextAction.trim()}` : ""}${input.note?.trim() ? `；${input.note.trim()}` : ""}${input.reviewDue ? `；复审 ${input.reviewDue}` : ""}`;
     after = insertProgressTrace(after, trace);
@@ -50,33 +51,6 @@ export function insertProgressTrace(content: string, trace: string): string {
   return lines.join("\n");
 }
 
-function setFrontmatterFields(content: string, fields: Record<string, string | undefined>): string {
-  const normalized = normalizeNewlines(content);
-  const parsed = parseFrontmatter(normalized);
-  if (!parsed) throw new Error("项目笔记缺少 YAML frontmatter，未执行写入。");
-  const lines = normalized.split("\n");
-  const header = lines.slice(1, parsed.endLine);
-  for (const [key, value] of Object.entries(fields)) {
-    const pattern = new RegExp(`^${escapeRegExp(key)}\\s*:`, "u");
-    const index = header.findIndex((line) => pattern.test(line));
-    if (value === undefined) {
-      if (index >= 0) {
-        header.splice(index, 1);
-        while (index < header.length && /^\s+/u.test(header[index] ?? "")) header.splice(index, 1);
-      }
-      continue;
-    }
-    const next = `${key}: ${JSON.stringify(value)}`;
-    if (index >= 0) {
-      header[index] = next;
-      while (index + 1 < header.length && /^\s+/u.test(header[index + 1] ?? "")) header.splice(index + 1, 1);
-    } else {
-      header.push(next);
-    }
-  }
-  return ["---", ...header, "---", ...lines.slice(parsed.endLine + 1)].join("\n");
-}
-
 function localDate(date: Date): string {
   const year = String(date.getFullYear()).padStart(4, "0");
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -84,6 +58,3 @@ function localDate(date: Date): string {
   return `${year}-${month}-${day}`;
 }
 
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
-}

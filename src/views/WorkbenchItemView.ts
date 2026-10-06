@@ -53,7 +53,7 @@ export class WorkbenchItemView extends ItemView {
     }
 
     try {
-      await this.controller.refresh();
+      await (this.controller.refreshOnOpen?.() ?? this.controller.refresh());
     } catch (error) {
       if (generation === this.openGeneration) this.renderFailure("数据刷新失败，当前显示的是上次缓存", error, false);
     }
