@@ -42,6 +42,14 @@ export interface TaskRecord {
   migrated?: boolean;
 }
 
+export interface TaskUpdatePatch {
+  completed?: boolean;
+  cancelled?: boolean;
+  due?: string | null;
+  scheduled?: string | null;
+  priority?: TaskRecord["priority"];
+}
+
 export interface ActivityDay {
   date: string;
   count: number;

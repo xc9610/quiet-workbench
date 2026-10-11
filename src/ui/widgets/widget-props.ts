@@ -167,6 +167,7 @@ export function scheduleProps(ctx: WidgetRenderContext) {
     dayTasks: ctx.calendarTodayTasks(),
     entriesForDate: (date: string) => ctx.calendarEntriesForDate(item, date),
     dotClass: ctx.calendarDotClass,
+    onExpand: ctx.source === "tasks" ? () => ctx.controller.openTaskBoard("calendar") : undefined,
     onMoveMonth: (offset: number) => ctx.onMoveMonth(item, offset),
     onToday: () => ctx.onCalendarToday(item),
     onSelectDate: (date: string) => ctx.onSelectDate(item, date),

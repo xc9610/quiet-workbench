@@ -424,6 +424,82 @@ describe("WriteTransactionExecutor", () => {
 });
 
 describe("project tasks and meeting migration", () => {
+  it("cancels and restores tasks with reversible transactions while preserving source metadata", async () => {
+    const vault = new MemoryVault();
+    const original = "---\ntype: 项目\n---\n## 待办\n  - [ ] Review 🔁 every week ⏳ 2026-10-11 📅 2026-10-15 🔼 ^cancel-1\n- [ ] Other ^other-1";
+    vault.seed("projects/a.md", original);
+    const executor = new WriteTransactionExecutor(vault);
+    const tasks = new ProjectTaskService(vault, executor);
+    let current = parseSingleTask(original, "projects/a.md", "project");
+    const cancelled = await tasks.update(current, { cancelled: true });
+    expect(cancelled.status).toBe("committed");
+    let content = await vault.read("projects/a.md");
+    expect(content).toBe(original.replace("- [ ] Review", "- [-] Review"));
+    current = parseSingleTask(content, "projects/a.md", "project");
+    expect(current).toMatchObject({ completed: true, cancelled: true });
+    const restored = await tasks.update(current, { cancelled: false, completed: false });
+    expect(await vault.read("projects/a.md")).toBe(original);
+    await executor.undo(restored.id);
+    expect(await vault.read("projects/a.md")).toBe(original.replace("- [ ] Review", "- [-] Review"));
+    await executor.undo(cancelled.id);
+    expect(await vault.read("projects/a.md")).toBe(original);
+  });
+
+  it("removes completion dates on cancellation and distinguishes completing an already cancelled task", async () => {
+    const vault = new MemoryVault();
+    vault.seed("projects/a.md", "## 待办\n- [x] Done 📅 2026-10-15 ✅ 2026-10-10 ^done-1");
+    const tasks = new ProjectTaskService(vault, new WriteTransactionExecutor(vault));
+    let current = parseSingleTask(await vault.read("projects/a.md"), "projects/a.md", "project");
+    await tasks.update(current, { cancelled: true });
+    let content = await vault.read("projects/a.md");
+    expect(content).toContain("- [-] Done 📅 2026-10-15 ^done-1");
+    expect(content).not.toContain("✅");
+    current = parseSingleTask(content, "projects/a.md", "project");
+    await tasks.complete(current, true, new Date(2026, 9, 11));
+    content = await vault.read("projects/a.md");
+    expect(content).toContain("- [x] Done 📅 2026-10-15 ✅ 2026-10-11 ^done-1");
+    expect(parseSingleTask(content, "projects/a.md", "project").cancelled).toBe(false);
+  });
+
+  it("does not cycle the Tasks API through custom statuses when cancelling or restoring", async () => {
+    const vault = new MemoryVault();
+    vault.seed("projects/a.md", "## 待办\n- [ ] Review ^task-1");
+    let toggles = 0;
+    const adapter = new TasksApiAdapter(() => ({
+      createTaskLineModal: async () => "",
+      editTaskLineModal: async () => "",
+      executeToggleTaskDoneCommand: (line) => { toggles++; return line.replace("[ ]", "[-]"); }
+    }));
+    const tasks = new ProjectTaskService(vault, new WriteTransactionExecutor(vault), adapter);
+    let current = parseSingleTask(await vault.read("projects/a.md"), "projects/a.md", "project");
+    await tasks.update(current, { cancelled: true });
+    current = parseSingleTask(await vault.read("projects/a.md"), "projects/a.md", "project");
+    await tasks.update(current, { cancelled: false });
+    expect(toggles).toBe(0);
+    expect(await vault.read("projects/a.md")).toContain("- [ ] Review ^task-1");
+    current = parseSingleTask(await vault.read("projects/a.md"), "projects/a.md", "project");
+    await tasks.update(current, { completed: true }, new Date(2026, 9, 11));
+    expect(toggles).toBe(1);
+    expect(await vault.read("projects/a.md")).toContain("- [x] Review ✅ 2026-10-11 ^task-1");
+  });
+
+  it("refuses stale cancellation and protects external edits during undo", async () => {
+    const vault = new MemoryVault();
+    vault.seed("projects/a.md", "## 待办\n- [ ] Review ^task-1");
+    const executor = new WriteTransactionExecutor(vault);
+    const tasks = new ProjectTaskService(vault, executor);
+    const current = parseSingleTask(await vault.read("projects/a.md"), "projects/a.md", "project");
+    const receipt = await tasks.update(current, { cancelled: true });
+    await expect(tasks.update(current, { cancelled: true })).rejects.toBeInstanceOf(RevisionConflictError);
+    const external = (await vault.read("projects/a.md")).replace("Review", "External edit");
+    vault.seed("projects/a.md", external);
+    const undo = await executor.undo(receipt.id);
+    expect(undo.status).not.toBe("committed");
+    expect(await vault.read("projects/a.md")).toBe(external);
+    const refreshed = parseSingleTask(external, "projects/a.md", "project");
+    await expect(tasks.update(refreshed, { cancelled: true, completed: true })).rejects.toThrow("cannot be completed and cancelled");
+  });
+
   it("keeps Tasks start dates separate from scheduled dates", async () => {
     const vault = new MemoryVault();
     vault.seed("projects/a.md", "## 待办\n- [ ] 写方案 🛫 2026-10-01 📅 2026-10-20 ^start-1");

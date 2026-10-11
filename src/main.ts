@@ -10,7 +10,7 @@ import {
   View,
   normalizePath
 } from "obsidian";
-import type { ActivityDay, ContextSurface, EntityKind, EntityRecord, LayoutItem, LayoutSchema, TaskRecord, TransactionReceipt } from "./core/types";
+import type { ActivityDay, ContextSurface, EntityKind, EntityRecord, LayoutItem, LayoutSchema, TaskRecord, TaskUpdatePatch, TransactionReceipt } from "./core/types";
 import { DiagnosticService, type DiagnosticVaultReader } from "./core/diagnostic";
 import { createBuiltinWidgetRegistry } from "./core/widget-registry";
 import { ensureActivityHeatmap, ensureContextSidebarLayouts, ensureScheduleOverview, ensureSingleWorkbenchLayout, ensureUnscheduledTaskList, getDefaultLayouts, upgradePersistedLayouts, validateLayout } from "./core/layout";
@@ -373,8 +373,8 @@ export class PluginWorkbenchController implements WorkbenchController {
     return { errors: updates.flatMap((update) => update.errors) };
   }
 
-  async openTaskBoard(): Promise<void> {
-    await this.plugin.activateTaskBoard();
+  async openTaskBoard(view?: "board" | "calendar"): Promise<void> {
+    await this.plugin.activateTaskBoard(view);
   }
 
   async openProjectReview(): Promise<void> {
@@ -517,7 +517,7 @@ export class PluginWorkbenchController implements WorkbenchController {
     await this.refresh();
   }
 
-  async updateTask(task: TaskRecord, patch: { completed?: boolean; due?: string | null; scheduled?: string | null; priority?: TaskRecord["priority"] }): Promise<TransactionReceipt> {
+  async updateTask(task: TaskRecord, patch: TaskUpdatePatch): Promise<TransactionReceipt> {
     this.requireWrites();
     const receipt = await this.tasks.update(task, patch);
     await this.afterReceipt(receipt, task.path);
@@ -917,10 +917,11 @@ export default class QuietWorkbenchPlugin extends Plugin {
     this.addSettingTab(new QuietWorkbenchSettingTab(this.app, this));
 
     this.addRibbonIcon(companionIconName(this.settings.companionName), this.settings.companionName ? `打开 ${this.settings.companionName} · ${this.settings.workspaceLabel || "工作台"}` : "打开 Asterism 工作台", () => void this.activateWorkbench());
-    this.addRibbonIcon("list-todo", "打开任务看板", () => void this.activateTaskBoard());
+    this.addRibbonIcon("list-todo", "打开任务（看板 / 月历）", () => void this.activateTaskBoard());
     this.addRibbonIcon("clipboard-check", "打开项目审阅", () => void this.activateProjectReview());
     this.addCommand({ id: "open-workbench", name: "打开工作台", callback: () => void this.activateWorkbench() });
-    this.addCommand({ id: "open-task-board", name: "打开任务看板", callback: () => void this.activateTaskBoard() });
+    this.addCommand({ id: "open-task-board", name: "打开任务（看板 / 月历）", callback: () => void this.activateTaskBoard() });
+    this.addCommand({ id: "open-task-calendar", name: "打开任务月历", callback: () => void this.activateTaskBoard("calendar") });
     this.addCommand({ id: "open-project-review", name: "打开项目审阅", callback: () => void this.activateProjectReview() });
     this.addCommand({
       id: "open-calendar",
@@ -986,10 +987,11 @@ export default class QuietWorkbenchPlugin extends Plugin {
     await this.app.workspace.revealLeaf(leaf);
   }
 
-  async activateTaskBoard(): Promise<void> {
+  async activateTaskBoard(view?: "board" | "calendar"): Promise<void> {
     const existing = this.app.workspace.getLeavesOfType(TASK_BOARD_VIEW_TYPE)[0];
     const leaf = existing ?? this.app.workspace.getLeaf("tab");
-    if (!existing) await leaf.setViewState({ type: TASK_BOARD_VIEW_TYPE, active: true });
+    if (!existing) await leaf.setViewState({ type: TASK_BOARD_VIEW_TYPE, active: true, state: view ? { view } : undefined });
+    else if (view && leaf.view instanceof TaskBoardItemView) leaf.view.selectTaskView(view);
     await this.app.workspace.revealLeaf(leaf);
   }
 

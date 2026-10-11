@@ -1,4 +1,4 @@
-import type { TaskRecord } from "../core/types";
+import type { TaskRecord, TaskUpdatePatch } from "../core/types";
 import type { DetailedTransactionReceipt } from "../domain/transactions";
 import {
   TASK_PATTERN,
@@ -78,8 +78,7 @@ export class ProjectTaskService {
 
   async complete(task: TaskRecord, completed = true, completedOn = new Date()): Promise<DetailedTransactionReceipt> {
     return this.mutate(task, (raw, current) => {
-      if (current.completed === completed) return raw;
-      return this.tasksApi?.toggleTask(raw, task.path) ?? renderCompletion(raw, completed, completedOn);
+      return this.changeStatus(raw, current, { completed }, task.path, completedOn);
     }, completed ? "Complete task" : "Reopen task");
   }
 
@@ -104,11 +103,14 @@ export class ProjectTaskService {
 
   async update(
     task: TaskRecord,
-    patch: { completed?: boolean; due?: string | null; scheduled?: string | null; priority?: TaskRecord["priority"] },
+    patch: TaskUpdatePatch,
     completedOn = new Date()
   ): Promise<DetailedTransactionReceipt> {
-    if (patch.completed === undefined && patch.due === undefined && patch.scheduled === undefined && patch.priority === undefined) {
+    if (patch.completed === undefined && patch.cancelled === undefined && patch.due === undefined && patch.scheduled === undefined && patch.priority === undefined) {
       throw new Error("Task update has no changed fields.");
+    }
+    if (patch.completed === true && patch.cancelled === true) {
+      throw new Error("A task cannot be completed and cancelled at the same time.");
     }
     validateOptionalDate(patch.due ?? undefined, "due");
     validateOptionalDate(patch.scheduled ?? undefined, "scheduled");
@@ -133,11 +135,31 @@ export class ProjectTaskService {
           return emoji ? `${withoutPriority} ${emoji}` : withoutPriority;
         });
       }
-      if (patch.completed !== undefined && current.completed !== patch.completed) {
-        updated = this.tasksApi?.toggleTask(updated, task.path) ?? renderCompletion(updated, patch.completed, completedOn);
-      }
-      return updated;
+      return this.changeStatus(updated, current, patch, task.path, completedOn);
     }, "Update task");
+  }
+
+  private changeStatus(raw: string, current: ParsedTask, patch: TaskUpdatePatch, path: string, completedOn: Date): string {
+    const target = patch.cancelled === true ? "cancelled"
+      : patch.completed === true ? "completed"
+      : patch.completed === false || (patch.cancelled === false && current.cancelled) ? "open"
+      : undefined;
+    const status = current.cancelled ? "cancelled" : current.completed ? "completed" : "open";
+    if (!target || target === status) return raw;
+    if (target === "cancelled") {
+      return preserveBlockId(raw, (withoutBlock) => {
+        const match = withoutBlock.match(TASK_PATTERN);
+        if (!match) throw new Error("The target line is no longer a Markdown task.");
+        const body = (match[3] ?? "").replace(/\s*✅\s*\d{4}-\d{2}-\d{2}/gu, "").trimEnd();
+        return `${match[1] ?? ""}- [-] ${body}`;
+      });
+    }
+    // Tasks' toggle can cycle through custom statuses. Cancellation/restoration must be explicit.
+    if (status === "cancelled") return renderCompletion(raw, target === "completed", completedOn);
+    const toggled = this.tasksApi?.toggleTask(raw, path);
+    const toggledTask = toggled ? parseMarkdown(toggled).tasks[0] : undefined;
+    if (toggled && toggledTask && !toggledTask.cancelled && toggledTask.completed === (target === "completed")) return toggled;
+    return renderCompletion(raw, target === "completed", completedOn);
   }
 
   private async mutate(

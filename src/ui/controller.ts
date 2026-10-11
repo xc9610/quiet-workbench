@@ -4,6 +4,7 @@ import type {
   EntityKind,
   LayoutItem,
   TaskRecord,
+  TaskUpdatePatch,
   TransactionReceipt
 } from "../core/types";
 import type { QuietWorkbenchSettings } from "../settings";
@@ -123,7 +124,7 @@ export interface WorkbenchController {
   /** Used when a view opens: a full scan only if none has completed yet, otherwise a light refresh. */
   refreshOnOpen?(): Promise<void>;
   openWorkbench(): Promise<void>;
-  openTaskBoard(): Promise<void>;
+  openTaskBoard(view?: "board" | "calendar"): Promise<void>;
   openProjectReview(): Promise<void>;
   setProjectAnimal(path: string, animalId: string): Promise<void>;
   openCalendar(): Promise<void>;
@@ -142,7 +143,7 @@ export interface WorkbenchController {
   addProjectTaskWithTasks(projectPath: string): Promise<"committed" | "cancelled" | "unavailable">;
   editTaskWithTasks(task: TaskRecord): Promise<"committed" | "cancelled" | "unavailable">;
   scheduleTaskInCalendar(task: TaskRecord, date: string): Promise<void>;
-  updateTask(task: TaskRecord, patch: { completed?: boolean; due?: string | null; scheduled?: string | null; priority?: TaskRecord["priority"] }): Promise<TransactionReceipt>;
+  updateTask(task: TaskRecord, patch: TaskUpdatePatch): Promise<TransactionReceipt>;
   migrateMeetingTask(task: TaskRecord, targetPath: string): Promise<TransactionReceipt | undefined>;
   migrateMeetingTasks(tasks: TaskRecord[], targetPath: string): Promise<MeetingMigrationBatchResult>;
   retryMeetingMigration(batch: MeetingMigrationBatchResult): Promise<MeetingMigrationBatchResult>;

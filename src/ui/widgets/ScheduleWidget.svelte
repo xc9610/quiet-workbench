@@ -23,6 +23,7 @@
   export let onOpenEntry: (entry: CalendarEntry) => void = () => {};
   export let onOpenPath: (path: string) => void = () => {};
   export let onOpenIntegration: () => void = () => {};
+  export let onExpand: (() => void) | undefined;
 
   function obsidianIcon(node: HTMLElement, name: string) {
     setIcon(node, name);
@@ -66,9 +67,10 @@
   </div>
 {:else}
   <div class="qwb-month-calendar">
-    <header class="qwb-month-calendar-toolbar">
+    <header class="qwb-month-calendar-toolbar" class:expandable={Boolean(onExpand)}>
       <button use:obsidianIcon={"chevron-left"} aria-label="上个月" title="上个月" on:click={() => onMoveMonth(-1)}></button>
       <strong>{monthLabel}</strong>
+      {#if onExpand}<button use:obsidianIcon={"expand"} aria-label="展开任务月历" title="在任务页面展开月历" on:click={onExpand}></button>{/if}
       <button class="qwb-calendar-today" on:click={onToday}>今天</button>
       <button use:obsidianIcon={"chevron-right"} aria-label="下个月" title="下个月" on:click={() => onMoveMonth(1)}></button>
     </header>
